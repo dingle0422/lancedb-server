@@ -40,6 +40,7 @@
         <input id="baseUrl" class="grow" placeholder="Base URL (默认当前源)" />
         <input id="apiKey" class="grow" placeholder="X-API-Key" />
         <button id="saveCfg">保存配置</button>
+        <button id="resetBaseUrl">重置 Base URL</button>
         <button id="healthBtn">健康检查</button>
         <span id="status" class="status">就绪</span>
       </div>
@@ -136,11 +137,41 @@
   <script>
     const $ = (id) => document.getElementById(id);
     const storeKeys = { baseUrl: "lancedb_ui_base_url", apiKey: "lancedb_ui_api_key" };
+    const REQUEST_TIMEOUT_MS = 20000;
     let allPolicies = [];
+
+    function inferDefaultBaseUrl() {
+      const p = window.location.pathname || "/";
+      let prefix = p;
+      if (/\/ui\/?$/.test(prefix)) {
+        prefix = prefix.replace(/\/ui\/?$/, "");
+      } else if (/\/static\/ui\.html$/.test(prefix)) {
+        prefix = prefix.replace(/\/static\/ui\.html$/, "");
+      }
+      prefix = prefix.replace(/\/+$/, "");
+      return window.location.origin + (prefix || "");
+    }
+
+    function chooseInitialBaseUrl() {
+      const inferred = inferDefaultBaseUrl();
+      const saved = (localStorage.getItem(storeKeys.baseUrl) || "").trim();
+      if (!saved) return inferred;
+      try {
+        const savedUrl = new URL(saved, window.location.origin);
+        const inferredUrl = new URL(inferred, window.location.origin);
+        const savedPath = savedUrl.pathname.replace(/\/+$/, "");
+        const inferredPath = inferredUrl.pathname.replace(/\/+$/, "");
+        const sameOrigin = savedUrl.origin === inferredUrl.origin;
+        const inferredHasPrefix = inferredPath && inferredPath !== "";
+        const savedIsRoot = !savedPath || savedPath === "";
+        if (sameOrigin && inferredHasPrefix && savedIsRoot) return inferred;
+      } catch {}
+      return saved;
+    }
 
     function baseUrl() {
       const v = $("baseUrl").value.trim();
-      return (v || window.location.origin).replace(/\/+$/, "");
+      return (v || inferDefaultBaseUrl()).replace(/\/+$/, "");
     }
 
     function setStatus(text, ok = true) {
@@ -240,16 +271,33 @@
       const apiKey = $("apiKey").value.trim();
       if (apiKey) headers["X-API-Key"] = apiKey;
       const req = { method: "GET", ...options, headers: { ...headers, ...(options.headers || {}) } };
-      setStatus(req.method + " " + path + " 请求中...");
-      const res = await fetch(baseUrl() + path, req);
-      let body = null;
-      try { body = await res.json(); } catch { body = await res.text(); }
-      if (!res.ok) {
-        setStatus(req.method + " " + path + " -> " + res.status, false);
-        throw new Error(typeof body === "string" ? body : JSON.stringify(body));
+      const url = baseUrl() + path;
+      setStatus(req.method + " " + url + " 请求中...");
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+      let httpErrorThrown = false;
+      try {
+        const res = await fetch(url, { ...req, signal: controller.signal });
+        const raw = await res.text();
+        let body = raw;
+        try { body = raw ? JSON.parse(raw) : null; } catch {}
+        if (!res.ok) {
+          setStatus(req.method + " " + url + " -> " + res.status, false);
+          httpErrorThrown = true;
+          throw new Error(typeof body === "string" ? body : JSON.stringify(body));
+        }
+        setStatus(req.method + " " + url + " -> " + res.status, true);
+        return body;
+      } catch (e) {
+        if (httpErrorThrown) throw e;
+        const msg = e && e.name === "AbortError"
+          ? "请求超时（20s），请检查网络或后端负载"
+          : String(e);
+        setStatus(req.method + " " + url + " -> 网络错误", false);
+        throw new Error(msg);
+      } finally {
+        clearTimeout(timer);
       }
-      setStatus(req.method + " " + path + " -> " + res.status, true);
-      return body;
     }
 
     async function refreshPolicies() {
@@ -263,6 +311,13 @@
       localStorage.setItem(storeKeys.baseUrl, $("baseUrl").value.trim());
       localStorage.setItem(storeKeys.apiKey, $("apiKey").value.trim());
       setStatus("配置已保存");
+    };
+
+    $("resetBaseUrl").onclick = () => {
+      const inferred = inferDefaultBaseUrl();
+      $("baseUrl").value = inferred;
+      localStorage.setItem(storeKeys.baseUrl, inferred);
+      setStatus("Base URL 已重置为当前页面前缀");
     };
 
     $("healthBtn").onclick = async () => {
@@ -397,7 +452,9 @@
     $("runExpand").onclick = async () => {
       try {
         const policy = selectedPolicy();
-        const chunkId = Number($("expandChunkId").value);
+        const rawCid = $("expandChunkId").value.trim();
+        if (!rawCid) throw new Error("chunk_id 不能为空");
+        const chunkId = Number(rawCid);
         if (!Number.isInteger(chunkId)) throw new Error("chunk_id 必须是整数");
         const body = { chunk_id: chunkId, include_content: $("expandIncludeContent").checked };
         render("relationsOut", await api("/v1/policies/" + encodeURIComponent(policy) + "/relations:expand", {
@@ -451,7 +508,7 @@
     });
 
     (function init() {
-      $("baseUrl").value = localStorage.getItem(storeKeys.baseUrl) || window.location.origin;
+      $("baseUrl").value = chooseInitialBaseUrl();
       $("apiKey").value = localStorage.getItem(storeKeys.apiKey) || "";
       refreshPolicies().catch((e) => render("policiesOut", String(e)));
     })();

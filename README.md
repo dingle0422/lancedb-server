@@ -55,14 +55,21 @@ curl http://127.0.0.1:5000/healthz
 服务启动后可直接访问：
 
 ```bash
-http://127.0.0.1:5000/ui
+http://127.0.0.1:5000/ui          # 原始 HTML + JS（带 X-API-Key 调试）
+http://127.0.0.1:5000/gradio/     # Lance Data Viewer 风格的 Gradio UI（推荐）
 ```
 
 说明：
 
-- 无需 Node / 前端构建链，页面由 FastAPI 同进程托管（`app/static/ui.html`）。
-- 页面顶部可填写 `X-API-Key`（会保存到浏览器 `localStorage`）。
-- 已覆盖常用管理与调试能力：
+- 两个 UI 都由 FastAPI 同进程托管，**起一个后端就完事**，无需 Node / 前端构建链。
+- `/ui`：原 `app/static/ui.html`，页面顶部填写 `X-API-Key`（保存在 `localStorage`）后即可调用 HTTP 接口。
+- `/gradio`：参考 [Lance Data Viewer](https://www.lancedb.com/blog/lance-data-viewer) 的设计，用 Gradio 写的 dataset 浏览器。**直接调用 `app.store` 的函数（同进程，零 HTTP 开销，也无需鉴权中转）**，覆盖：
+  - 左侧 dataset（policy）列表，显示行数 / 向量维度
+  - **Schema** tab：表 meta（行数、维度、索引状态）+ 完整 pyarrow schema
+  - **Browse** tab：where 过滤 + 分页 + 列选择，**vector 列以 unicode sparkline 紧凑展示**（如 `[768d] ▃▅▂▇▆▄▁█…`），免去看一长串浮点数
+  - **Hybrid Search** tab：`query_tokenized` + `query_vector` (JSON) + `top_n/top_m/rrf_k/where`，调用本地 BM25 + 向量 + RRF
+  - **Danger** tab：二次确认后删除 dataset
+- 已覆盖原 `/ui` 常用管理与调试能力：
   - policy 列表、meta 查看
   - chunks 列表查询（where / limit / include_content）
   - hybrid search 调试（`query_tokenized` + `query_vector`）

@@ -339,10 +339,24 @@ def _existing_dim(policy_id: str) -> int:
 
 
 def _row_to_hit(row: dict, *, include_content: bool) -> SearchHit:
+    score_raw = row.get("_score")
+    if score_raw is None:
+        # 某些 LanceDB 版本在非检索读取路径下不会给 _score，或返回 None。
+        score_raw = row.get("_distance")
+        if score_raw is not None:
+            try:
+                score_raw = -float(score_raw)
+            except Exception:
+                score_raw = 0.0
+    try:
+        score = float(score_raw if score_raw is not None else 0.0)
+    except Exception:
+        score = 0.0
+
     rks = row.get("relation_keys") or []
     return SearchHit(
         chunk_id=int(row["chunk_id"]),
-        score=float(row.get("_score", 0.0)),
+        score=score,
         content=row.get("content") if include_content else None,
         heading_paths=[list(p) for p in (row.get("heading_paths") or [])],
         directories=list(row.get("directories") or []),

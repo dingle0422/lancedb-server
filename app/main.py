@@ -12,7 +12,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from .config import get_settings
@@ -70,3 +70,23 @@ if _STATIC_DIR.exists():
 @app.get("/ui", include_in_schema=False)
 async def web_ui() -> FileResponse:
     return FileResponse(_STATIC_DIR / "ui.html")
+
+
+# ---- Gradio 前端（Lance Data Viewer 风格），同进程挂载到 /gradio ----
+try:
+    import gradio as gr  # type: ignore
+
+    from .ui_gradio import build_demo
+
+    app = gr.mount_gradio_app(app, build_demo(), path="/gradio")
+
+    # 强制访问 /gradio 时跳到 /gradio/，否则前端相对路径会指向站点根 /info、/config，
+    # 命中 FastAPI 的 404 HTML 页面，JS 解析 JSON 失败报 "Unexpected token '<'"
+    @app.get("/gradio", include_in_schema=False)
+    async def _gradio_redirect() -> RedirectResponse:
+        return RedirectResponse(url="/gradio/", status_code=307)
+
+except Exception as _gradio_exc:  # noqa: BLE001
+    logging.getLogger(__name__).warning(
+        "gradio UI 未启用（pip install gradio 后即可在 /gradio 访问）：%s", _gradio_exc
+    )

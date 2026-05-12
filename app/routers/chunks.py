@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from functools import partial
 
 import anyio
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -50,12 +51,15 @@ async def list_chunks(
     include_content: bool = Query(default=False),
 ) -> list[SearchHit]:
     try:
-        hits = await anyio.to_thread.run_sync(
+        fn = partial(
             store.list_chunks,
             policy_id,
-            where,
-            limit,
-            include_content,
+            where=where,
+            limit=limit,
+            include_content=include_content,
+        )
+        hits = await anyio.to_thread.run_sync(
+            fn,
         )
     except Exception as e:
         logger.exception("[chunks] list 失败 policy=%s", policy_id)
