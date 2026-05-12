@@ -1,0 +1,9 @@
+# https://pypi.tuna.tsinghua.edu.cn/simple
+lancedb>=0.13
+pyarrow>=15
+fastapi>=0.111
+uvicorn[standard]>=0.30
+pydantic>=2.7
+pydantic-settings>=2.3
+anyio>=4.4
+structlog>=24.1
