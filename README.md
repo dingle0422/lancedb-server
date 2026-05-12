@@ -39,7 +39,7 @@ python -m venv .venv && .venv\Scripts\activate          # Windows
 # source .venv/bin/activate                              # Linux/Mac
 pip install -e .
 cp .env.example .env                                     # Windows: copy .env.example .env
-uvicorn app.main:app --host 127.0.0.1 --port 8088 --reload
+uvicorn app.main:app --host 127.0.0.1 --port 5000 --reload
 # 或者直接使用项目入口脚本
 python main.py
 ```
@@ -47,8 +47,27 @@ python main.py
 健康检查：
 
 ```bash
-curl http://127.0.0.1:8088/healthz
+curl http://127.0.0.1:5000/healthz
 ```
+
+### WebUI（最轻量管理页）
+
+服务启动后可直接访问：
+
+```bash
+http://127.0.0.1:5000/ui
+```
+
+说明：
+
+- 无需 Node / 前端构建链，页面由 FastAPI 同进程托管（`app/static/ui.html`）。
+- 页面顶部可填写 `X-API-Key`（会保存到浏览器 `localStorage`）。
+- 已覆盖常用管理与调试能力：
+  - policy 列表、meta 查看
+  - chunks 列表查询（where / limit / include_content）
+  - hybrid search 调试（`query_tokenized` + `query_vector`）
+  - upsert chunks、删除 policy
+  - relations 的 expand / lookup / lookup-dependents
 
 ### Docker
 

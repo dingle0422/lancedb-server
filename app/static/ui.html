@@ -1,0 +1,460 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>LanceDB WebUI</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; background: #f5f7fb; color: #222; }
+    .wrap { max-width: 1200px; margin: 0 auto; padding: 16px; }
+    .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px; margin-bottom: 12px; }
+    h1, h2 { margin: 0 0 10px 0; }
+    h1 { font-size: 20px; }
+    h2 { font-size: 16px; }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
+    input, textarea, select, button { font: inherit; }
+    input, textarea, select { border: 1px solid #d1d5db; border-radius: 6px; padding: 6px 8px; }
+    input, select { height: 34px; }
+    textarea { width: 100%; min-height: 90px; resize: vertical; }
+    button { border: 1px solid #cbd5e1; background: #f8fafc; border-radius: 6px; padding: 6px 10px; cursor: pointer; }
+    button:hover { background: #f1f5f9; }
+    .grow { flex: 1; min-width: 220px; }
+    .status { font-size: 13px; color: #374151; }
+    .err { color: #b91c1c; }
+    .ok { color: #166534; }
+    pre { margin: 0; background: #0b1020; color: #d1e5ff; border-radius: 6px; padding: 10px; max-height: 320px; overflow: auto; font-size: 12px; }
+    .two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .tableWrap { overflow: auto; border: 1px solid #e5e7eb; border-radius: 6px; margin-top: 8px; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th, td { border-bottom: 1px solid #eef2f7; padding: 6px 8px; text-align: left; white-space: nowrap; }
+    th { background: #f8fafc; }
+    .tiny { font-size: 12px; color: #6b7280; }
+    @media (max-width: 900px) { .two { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h1>LanceDB 管理台（最小版）</h1>
+      <div class="row">
+        <input id="baseUrl" class="grow" placeholder="Base URL (默认当前源)" />
+        <input id="apiKey" class="grow" placeholder="X-API-Key" />
+        <button id="saveCfg">保存配置</button>
+        <button id="healthBtn">健康检查</button>
+        <span id="status" class="status">就绪</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Policy 管理</h2>
+      <div class="row">
+        <button id="refreshPolicies">刷新 policy 列表</button>
+        <input id="policyFilter" class="grow" placeholder="按 policy_id 过滤" />
+        <select id="policySelect" class="grow"></select>
+        <button id="loadMeta">查看 Meta</button>
+        <button id="dropPolicy">删除当前 Policy</button>
+        <span id="policyCount" class="tiny"></span>
+      </div>
+      <pre id="policiesOut"></pre>
+    </div>
+
+    <div class="two">
+      <div class="card">
+        <h2>Chunks 列表</h2>
+        <div class="row">
+          <input id="chunksWhere" class="grow" placeholder="where (可选)" />
+          <input id="chunksLimit" type="number" value="100" min="1" />
+          <label><input id="chunksIncludeContent" type="checkbox" /> include_content</label>
+          <button id="listChunks">查询 chunks</button>
+        </div>
+        <pre id="chunksOut"></pre>
+        <div id="chunksTable" class="tableWrap"></div>
+      </div>
+
+      <div class="card">
+        <h2>Search 调试</h2>
+        <div class="row">
+          <input id="searchTokenized" class="grow" placeholder="query_tokenized（空格分词串）" />
+        </div>
+        <div class="row">
+          <textarea id="searchVector" placeholder='query_vector(JSON数组)，如: [0.1, 0.2]'></textarea>
+        </div>
+        <div class="row">
+          <input id="searchWhere" class="grow" placeholder="where (可选)" />
+          <input id="topN" type="number" value="20" min="1" />
+          <input id="topM" type="number" value="20" min="1" />
+          <label><input id="includeContent" type="checkbox" checked /> include_content</label>
+          <label><input id="includeDerived" type="checkbox" checked /> include_derived</label>
+          <button id="fillSearchTpl">填充示例</button>
+          <button id="runSearch">执行 search</button>
+        </div>
+        <pre id="searchOut"></pre>
+        <div id="searchTable" class="tableWrap"></div>
+      </div>
+    </div>
+
+    <div class="two">
+      <div class="card">
+        <h2>Upsert（写入）</h2>
+        <div class="row">
+          <select id="upsertMode">
+            <option value="overwrite">overwrite</option>
+            <option value="append">append</option>
+            <option value="merge_by_chunk_id">merge_by_chunk_id</option>
+          </select>
+          <input id="expectedDim" type="number" min="1" placeholder="expected_dim(可选)" />
+          <button id="fillUpsertTpl">填充示例</button>
+          <button id="runUpsert">执行 upsert</button>
+        </div>
+        <textarea id="upsertChunks" placeholder='chunks(JSON数组)，如: [{"chunk_id":1,"content":"x","content_tokenized":"x","vector":[0.1]}]'></textarea>
+        <pre id="upsertOut"></pre>
+      </div>
+
+      <div class="card">
+        <h2>Relations 调试</h2>
+        <div class="row">
+          <input id="expandChunkId" type="number" placeholder="chunk_id" />
+          <label><input id="expandIncludeContent" type="checkbox" checked /> include_content</label>
+          <button id="runExpand">expand</button>
+        </div>
+        <div class="row">
+          <input id="lookupTargetPolicy" class="grow" placeholder="target_policy_id" />
+          <input id="lookupTargetClause" class="grow" placeholder="target_clause_id(可选)" />
+          <label><input id="lookupIncludeContent" type="checkbox" /> include_content</label>
+          <button id="runLookup">lookup</button>
+        </div>
+        <div class="row">
+          <input id="depTargetPolicy" class="grow" placeholder="target_policy_id" />
+          <input id="depTargetClause" class="grow" placeholder="target_clause_id(可选)" />
+          <button id="runDependents">lookup-dependents</button>
+        </div>
+        <pre id="relationsOut"></pre>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const storeKeys = { baseUrl: "lancedb_ui_base_url", apiKey: "lancedb_ui_api_key" };
+    let allPolicies = [];
+
+    function baseUrl() {
+      const v = $("baseUrl").value.trim();
+      return (v || window.location.origin).replace(/\/+$/, "");
+    }
+
+    function setStatus(text, ok = true) {
+      const el = $("status");
+      el.textContent = text;
+      el.className = "status " + (ok ? "ok" : "err");
+    }
+
+    function selectedPolicy() {
+      const v = $("policySelect").value;
+      if (!v) throw new Error("请先选择 policy");
+      return v;
+    }
+
+    function parseJson(text, fieldName) {
+      const raw = (text || "").trim();
+      if (!raw) return null;
+      try {
+        return JSON.parse(raw);
+      } catch {
+        throw new Error(fieldName + " 不是合法 JSON");
+      }
+    }
+
+    function ensureNumberArray(arr, fieldName) {
+      if (!Array.isArray(arr)) throw new Error(fieldName + " 必须是数组");
+      for (const n of arr) {
+        if (typeof n !== "number" || Number.isNaN(n)) throw new Error(fieldName + " 必须是数字数组");
+      }
+      return arr;
+    }
+
+    function ensurePositiveInt(value, fieldName) {
+      const n = Number(value);
+      if (!Number.isInteger(n) || n <= 0) throw new Error(fieldName + " 必须是正整数");
+      return n;
+    }
+
+    function render(outId, data) {
+      $(outId).textContent = typeof data === "string" ? data : JSON.stringify(data, null, 2);
+    }
+
+    function esc(text) {
+      return String(text == null ? "" : text).replace(/[&<>"']/g, (c) => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        "\"": "&quot;",
+        "'": "&#39;"
+      }[c]));
+    }
+
+    function renderHitsTable(containerId, hits) {
+      const el = $(containerId);
+      if (!Array.isArray(hits) || hits.length === 0) {
+        el.innerHTML = "<div class='tiny' style='padding:8px;'>暂无结果</div>";
+        return;
+      }
+      const rows = hits.slice(0, 200).map((h) => {
+        const chunkId = h.chunk_id == null ? "" : h.chunk_id;
+        const score = h.score == null ? "" : Number(h.score).toFixed(4);
+        const kind = h.kind == null ? "" : h.kind;
+        const clause = h.clause_id == null ? "" : h.clause_id;
+        const source = h.source == null ? "" : h.source;
+        const content = h.content == null ? "" : String(h.content).slice(0, 80);
+        return "<tr>"
+          + "<td>" + esc(chunkId) + "</td>"
+          + "<td>" + esc(score) + "</td>"
+          + "<td>" + esc(kind) + "</td>"
+          + "<td>" + esc(clause) + "</td>"
+          + "<td>" + esc(source) + "</td>"
+          + "<td title='" + esc(h.content || "") + "'>" + esc(content) + "</td>"
+          + "<td><button class='copyBtn' data-copy='" + esc(chunkId) + "'>复制 chunk_id</button></td>"
+          + "</tr>";
+      }).join("");
+      el.innerHTML = "<table><thead><tr><th>chunk_id</th><th>score</th><th>kind</th><th>clause_id</th><th>source</th><th>content(截断)</th><th>操作</th></tr></thead><tbody>" + rows + "</tbody></table>";
+    }
+
+    function renderPolicyOptions() {
+      const select = $("policySelect");
+      const current = select.value;
+      const keyword = $("policyFilter").value.trim().toLowerCase();
+      const list = keyword ? allPolicies.filter((p) => String(p.policy_id).toLowerCase().includes(keyword)) : allPolicies;
+      select.innerHTML = "";
+      for (const p of list) {
+        const opt = document.createElement("option");
+        opt.value = p.policy_id;
+        opt.textContent = p.policy_id + " (" + p.n_chunks + ")";
+        select.appendChild(opt);
+      }
+      $("policyCount").textContent = "共 " + allPolicies.length + "，当前显示 " + list.length;
+      if (current && list.some((x) => x.policy_id === current)) select.value = current;
+    }
+
+    async function api(path, options = {}) {
+      const headers = { "Content-Type": "application/json" };
+      const apiKey = $("apiKey").value.trim();
+      if (apiKey) headers["X-API-Key"] = apiKey;
+      const req = { method: "GET", ...options, headers: { ...headers, ...(options.headers || {}) } };
+      setStatus(req.method + " " + path + " 请求中...");
+      const res = await fetch(baseUrl() + path, req);
+      let body = null;
+      try { body = await res.json(); } catch { body = await res.text(); }
+      if (!res.ok) {
+        setStatus(req.method + " " + path + " -> " + res.status, false);
+        throw new Error(typeof body === "string" ? body : JSON.stringify(body));
+      }
+      setStatus(req.method + " " + path + " -> " + res.status, true);
+      return body;
+    }
+
+    async function refreshPolicies() {
+      const data = await api("/v1/policies");
+      render("policiesOut", data);
+      allPolicies = (data && data.policies) || [];
+      renderPolicyOptions();
+    }
+
+    $("saveCfg").onclick = () => {
+      localStorage.setItem(storeKeys.baseUrl, $("baseUrl").value.trim());
+      localStorage.setItem(storeKeys.apiKey, $("apiKey").value.trim());
+      setStatus("配置已保存");
+    };
+
+    $("healthBtn").onclick = async () => {
+      try { render("policiesOut", await api("/healthz")); } catch (e) { render("policiesOut", String(e)); }
+    };
+
+    $("refreshPolicies").onclick = async () => {
+      try { await refreshPolicies(); } catch (e) { render("policiesOut", String(e)); }
+    };
+    $("policyFilter").oninput = () => renderPolicyOptions();
+
+    $("loadMeta").onclick = async () => {
+      try {
+        const policy = selectedPolicy();
+        render("policiesOut", await api("/v1/policies/" + encodeURIComponent(policy) + "/meta"));
+      } catch (e) {
+        render("policiesOut", String(e));
+      }
+    };
+
+    $("dropPolicy").onclick = async () => {
+      try {
+        const policy = selectedPolicy();
+        if (!window.confirm("确认删除 policy: " + policy + " ?")) return;
+        render("policiesOut", await api("/v1/policies/" + encodeURIComponent(policy), { method: "DELETE" }));
+        await refreshPolicies();
+      } catch (e) {
+        render("policiesOut", String(e));
+      }
+    };
+
+    $("listChunks").onclick = async () => {
+      try {
+        const policy = selectedPolicy();
+        const q = new URLSearchParams();
+        const where = $("chunksWhere").value.trim();
+        if (where) q.set("where", where);
+        q.set("limit", String(ensurePositiveInt($("chunksLimit").value || 100, "limit")));
+        q.set("include_content", $("chunksIncludeContent").checked ? "true" : "false");
+        const hits = await api("/v1/policies/" + encodeURIComponent(policy) + "/chunks?" + q.toString());
+        render("chunksOut", hits);
+        renderHitsTable("chunksTable", hits);
+      } catch (e) {
+        render("chunksOut", String(e));
+        renderHitsTable("chunksTable", []);
+      }
+    };
+
+    $("runSearch").onclick = async () => {
+      try {
+        const policy = selectedPolicy();
+        const vectorJson = parseJson($("searchVector").value, "query_vector");
+        const body = {
+          query_tokenized: $("searchTokenized").value.trim(),
+          query_vector: vectorJson ? ensureNumberArray(vectorJson, "query_vector") : [],
+          top_n: ensurePositiveInt($("topN").value || 20, "top_n"),
+          top_m: ensurePositiveInt($("topM").value || 20, "top_m"),
+          where: $("searchWhere").value.trim() || null,
+          include_content: $("includeContent").checked,
+          include_derived: $("includeDerived").checked
+        };
+        const data = await api("/v1/policies/" + encodeURIComponent(policy) + "/search", {
+          method: "POST",
+          body: JSON.stringify(body)
+        });
+        render("searchOut", data);
+        renderHitsTable("searchTable", data.hits || []);
+      } catch (e) {
+        render("searchOut", String(e));
+        renderHitsTable("searchTable", []);
+      }
+    };
+
+    $("fillSearchTpl").onclick = () => {
+      $("searchTokenized").value = "测试 条款 检索";
+      $("searchVector").value = "[0.01, 0.02, 0.03]";
+      $("topN").value = "20";
+      $("topM").value = "20";
+      $("searchWhere").value = "";
+      $("includeContent").checked = true;
+      $("includeDerived").checked = true;
+      setStatus("已填充 search 示例");
+    };
+
+    $("runUpsert").onclick = async () => {
+      try {
+        const policy = selectedPolicy();
+        const parsedChunks = parseJson($("upsertChunks").value, "chunks");
+        if (!Array.isArray(parsedChunks) || parsedChunks.length === 0) {
+          throw new Error("chunks 必须是非空 JSON 数组");
+        }
+        const body = {
+          chunks: parsedChunks,
+          mode: $("upsertMode").value
+        };
+        const d = $("expectedDim").value.trim();
+        if (d) body.expected_dim = ensurePositiveInt(d, "expected_dim");
+        render("upsertOut", await api("/v1/policies/" + encodeURIComponent(policy) + "/chunks:upsert", {
+          method: "POST",
+          body: JSON.stringify(body)
+        }));
+        await refreshPolicies();
+      } catch (e) {
+        render("upsertOut", String(e));
+      }
+    };
+
+    $("fillUpsertTpl").onclick = () => {
+      const now = Date.now();
+      const sample = [{
+        chunk_id: 1,
+        content: "这是一个示例知识片段",
+        content_tokenized: "这是 一个 示例 知识 片段",
+        vector: [0.01, 0.02, 0.03],
+        kind: "original",
+        parent_chunk_index: -1,
+        derived_seq: 0,
+        relation_keys: [],
+        hop_depth: 0,
+        source: "local",
+        clause_id: "demo-1",
+        heading_paths: [["示例", "章节1"]],
+        directories: ["demo"],
+        built_at: now
+      }];
+      $("upsertChunks").value = JSON.stringify(sample, null, 2);
+      $("upsertMode").value = "merge_by_chunk_id";
+      $("expectedDim").value = "3";
+      setStatus("已填充 upsert 示例");
+    };
+
+    $("runExpand").onclick = async () => {
+      try {
+        const policy = selectedPolicy();
+        const chunkId = Number($("expandChunkId").value);
+        if (!Number.isInteger(chunkId)) throw new Error("chunk_id 必须是整数");
+        const body = { chunk_id: chunkId, include_content: $("expandIncludeContent").checked };
+        render("relationsOut", await api("/v1/policies/" + encodeURIComponent(policy) + "/relations:expand", {
+          method: "POST",
+          body: JSON.stringify(body)
+        }));
+      } catch (e) {
+        render("relationsOut", String(e));
+      }
+    };
+
+    $("runLookup").onclick = async () => {
+      try {
+        const policy = selectedPolicy();
+        const targetPolicy = $("lookupTargetPolicy").value.trim();
+        if (!targetPolicy) throw new Error("target_policy_id 必填");
+        const q = new URLSearchParams({ target_policy_id: targetPolicy });
+        const clause = $("lookupTargetClause").value.trim();
+        if (clause) q.set("target_clause_id", clause);
+        q.set("include_content", $("lookupIncludeContent").checked ? "true" : "false");
+        render("relationsOut", await api("/v1/policies/" + encodeURIComponent(policy) + "/relations:lookup?" + q.toString()));
+      } catch (e) {
+        render("relationsOut", String(e));
+      }
+    };
+
+    $("runDependents").onclick = async () => {
+      try {
+        const targetPolicy = $("depTargetPolicy").value.trim();
+        if (!targetPolicy) throw new Error("target_policy_id 必填");
+        const q = new URLSearchParams({ target_policy_id: targetPolicy });
+        const clause = $("depTargetClause").value.trim();
+        if (clause) q.set("target_clause_id", clause);
+        render("relationsOut", await api("/v1/relations:lookup-dependents?" + q.toString()));
+      } catch (e) {
+        render("relationsOut", String(e));
+      }
+    };
+
+    document.addEventListener("click", async (e) => {
+      const target = e.target;
+      if (!(target instanceof HTMLElement)) return;
+      if (!target.classList.contains("copyBtn")) return;
+      const v = target.getAttribute("data-copy") || "";
+      try {
+        await navigator.clipboard.writeText(v);
+        setStatus("已复制: " + v);
+      } catch {
+        setStatus("复制失败，请手动复制", false);
+      }
+    });
+
+    (function init() {
+      $("baseUrl").value = localStorage.getItem(storeKeys.baseUrl) || window.location.origin;
+      $("apiKey").value = localStorage.getItem(storeKeys.apiKey) || "";
+      refreshPolicies().catch((e) => render("policiesOut", String(e)));
+    })();
+  </script>
+</body>
+</html>

@@ -1,6 +1,6 @@
 """retrieval_service 主入口。
 
-裸启动：``uvicorn app.main:app --host 0.0.0.0 --port 8088``
+裸启动：``uvicorn app.main:app --host 0.0.0.0 --port 5000``
 容器启动：见 ``Dockerfile``，``docker-compose up`` 即可。
 """
 
@@ -8,9 +8,12 @@ from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from .config import get_settings
 from .routers import chunks, health, meta, relations, search
@@ -58,3 +61,12 @@ app.include_router(chunks.router)
 app.include_router(search.router)
 app.include_router(relations.router)
 app.include_router(meta.router)
+
+_STATIC_DIR = Path(__file__).parent / "static"
+if _STATIC_DIR.exists():
+    app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
+
+
+@app.get("/ui", include_in_schema=False)
+async def web_ui() -> FileResponse:
+    return FileResponse(_STATIC_DIR / "ui.html")
