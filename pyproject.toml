@@ -13,6 +13,7 @@ dependencies = [
   "anyio>=4.4",
   "structlog>=24.1",
   "gradio>=4.40",
+  "jieba>=0.42",
 ]
 
 [project.optional-dependencies]

@@ -51,6 +51,112 @@ def _get_write_lock(policy_id: str) -> threading.Lock:
         return _write_locks[policy_id]
 
 
+def _evict_and_release(policy_id: str) -> None:
+    """从进程内缓存弹出 Table 句柄并强制 GC，让底层 Rust 释放 .lance 文件描述符。
+
+    LanceDB 的 ``Table`` Python 对象包了一个 Rust ``Dataset``，后者持有 OS 级 file handles。
+    仅 ``dict.pop`` 弹引用不够：必须把所有 Python 引用一并清掉，再触发一次 ``gc.collect``，
+    底层文件锁才会被释放，否则 ``db.drop_table`` 在 Linux mount 卷 / Windows NTFS 上会
+    抛 ``Device or resource busy (os error 16)``。
+    """
+
+    import gc
+
+    with _table_lock:
+        tbl = _table_cache.pop(policy_id, None)
+    del tbl  # 局部引用也丢掉
+    gc.collect()
+
+
+def _drop_table_with_retry(db, name: str, *, attempts: int = 6) -> None:
+    """碰到 ``Device or resource busy`` 时退避重试（最大 ~6s）。"""
+
+    import gc as _gc
+    import time as _time
+
+    last_exc: Exception | None = None
+    for i in range(1, attempts + 1):
+        try:
+            db.drop_table(name)
+            return
+        except Exception as e:  # noqa: BLE001
+            last_exc = e
+            msg = str(e)
+            transient = (
+                "Device or resource busy" in msg
+                or "os error 16" in msg
+                or "PermissionError" in msg
+                or "being used by another process" in msg
+            )
+            if not transient or i == attempts:
+                raise
+            backoff = 0.3 * i
+            logger.warning(
+                "[Store] drop_table %s 第 %d/%d 次忙，%.1fs 后重试: %s",
+                name, i, attempts, backoff, e,
+            )
+            _gc.collect()
+            _time.sleep(backoff)
+    if last_exc:
+        raise last_exc
+
+
+def _truncate_and_add(tbl, batch: pa.RecordBatch) -> None:
+    """同 schema 的 overwrite：删全部行 + add，避开任何文件系统级 rm。"""
+
+    # LanceDB SQL 不一定接受 ``true``；用一个永真表达式做兜底。
+    for predicate in ("true", "1=1", "chunk_id IS NOT NULL OR chunk_id IS NULL"):
+        try:
+            tbl.delete(predicate)
+            break
+        except Exception as e:  # noqa: BLE001
+            logger.debug("[Store] delete predicate %r 失败，尝试下一个: %s", predicate, e)
+    tbl.add(batch)
+
+
+def _overwrite_or_create(db, policy_id: str, name: str, batch: pa.RecordBatch, dim: int, existing_dim: int):
+    """overwrite 路径的 EBUSY-safe 实现，按从轻到重三步降级：
+
+    1. 表已存在且 dim 一致 → ``tbl.delete('true') + tbl.add(batch)``
+       ─ 完全不删目录，根本不会触发 ``Device or resource busy``。
+    2. 表不存在 / dim 变化 → ``db.create_table(..., mode='overwrite')``
+       ─ LanceDB 原生原子覆盖，写新 manifest，不 rm -rf 老文件夹。
+    3. ``mode='overwrite'`` 在老版本不被支持时 → 退化到 ``drop_table + create_table``
+       ─ 此时才会触发 EBUSY，已有 GC + 6 次退避兜底。
+    """
+
+    table_existed = name in db.table_names()
+
+    if table_existed and existing_dim and dim and existing_dim == dim:
+        try:
+            with _table_lock:
+                tbl = _table_cache.get(policy_id)
+            if tbl is None:
+                tbl = db.open_table(name)
+            _truncate_and_add(tbl, batch)
+            return tbl
+        except Exception as e:  # noqa: BLE001
+            logger.warning(
+                "[Store] truncate+add 失败，退化到 create(mode=overwrite): %s", e
+            )
+            _evict_and_release(policy_id)
+
+    try:
+        return db.create_table(name, data=batch, schema=batch.schema, mode="overwrite")
+    except TypeError:
+        # 旧版 lancedb 不接受 mode 参数 → drop + create
+        pass
+    except Exception as e:  # noqa: BLE001
+        logger.warning(
+            "[Store] create(mode=overwrite) 失败，退化到 drop+create: %s", e
+        )
+
+    if table_existed:
+        _evict_and_release(policy_id)
+        _drop_table_with_retry(db, name)
+    return db.create_table(name, data=batch, schema=batch.schema)
+
+
 def _safe_policy_dir(policy_id: str) -> str:
     """把任意 policy_id 编码为安全的目录名。"""
 
@@ -116,9 +222,8 @@ def drop_table(policy_id: str) -> bool:
         name = _safe_policy_dir(policy_id)
         if name not in db.table_names():
             return False
-        with _table_lock:
-            _table_cache.pop(policy_id, None)
-        db.drop_table(name)
+        _evict_and_release(policy_id)
+        _drop_table_with_retry(db, name)
         return True
 
 
@@ -297,12 +402,7 @@ def upsert(policy_id: str, rows: list[ChunkRow], mode: str, expected_dim: int | 
         batch = _build_record_batch(rows, dim)
 
         if mode == "overwrite" or name not in db.table_names():
-            # overwrite 或不存在：先清缓存释放文件句柄，再删旧建新
-            if name in db.table_names():
-                with _table_lock:
-                    _table_cache.pop(policy_id, None)
-                db.drop_table(name)
-            tbl = db.create_table(name, data=batch, schema=batch.schema)
+            tbl = _overwrite_or_create(db, policy_id, name, batch, dim, existing_dim)
         else:
             # 始终复用缓存句柄，避免产生多个持有同一文件的 Table 对象
             with _table_lock:
