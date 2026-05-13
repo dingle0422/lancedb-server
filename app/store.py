@@ -39,6 +39,17 @@ _db: Any | None = None
 _table_cache: dict[str, Any] = {}
 _table_lock = threading.Lock()
 
+# 每张表独立的写锁，防止并发写同一张表导致 EBUSY
+_write_locks: dict[str, threading.Lock] = {}
+_write_locks_lock = threading.Lock()
+
+
+def _get_write_lock(policy_id: str) -> threading.Lock:
+    with _write_locks_lock:
+        if policy_id not in _write_locks:
+            _write_locks[policy_id] = threading.Lock()
+        return _write_locks[policy_id]
+
 
 def _safe_policy_dir(policy_id: str) -> str:
     """把任意 policy_id 编码为安全的目录名。"""
@@ -99,14 +110,16 @@ def open_table(policy_id: str):
 
 
 def drop_table(policy_id: str) -> bool:
-    db = _connect()
-    name = _safe_policy_dir(policy_id)
-    if name not in db.table_names():
-        return False
-    db.drop_table(name)
-    with _table_lock:
-        _table_cache.pop(policy_id, None)
-    return True
+    write_lock = _get_write_lock(policy_id)
+    with write_lock:
+        db = _connect()
+        name = _safe_policy_dir(policy_id)
+        if name not in db.table_names():
+            return False
+        with _table_lock:
+            _table_cache.pop(policy_id, None)
+        db.drop_table(name)
+        return True
 
 
 def list_policies() -> list[tuple[str, int, int]]:
@@ -269,55 +282,61 @@ def upsert(policy_id: str, rows: list[ChunkRow], mode: str, expected_dim: int | 
     if not rows:
         return {"written": 0, "table_size": _row_count(policy_id), "dim": _existing_dim(policy_id)}
 
-    db = _connect()
-    name = _safe_policy_dir(policy_id)
+    write_lock = _get_write_lock(policy_id)
+    with write_lock:
+        db = _connect()
+        name = _safe_policy_dir(policy_id)
 
-    incoming_dim = _infer_dim(rows, expected_dim)
-    existing_dim = _existing_dim(policy_id)
-    if existing_dim and incoming_dim and existing_dim != incoming_dim:
-        raise ValueError(
-            f"dim mismatch for policy={policy_id}: existing={existing_dim} incoming={incoming_dim}"
-        )
-    dim = incoming_dim or existing_dim
-    batch = _build_record_batch(rows, dim)
+        incoming_dim = _infer_dim(rows, expected_dim)
+        existing_dim = _existing_dim(policy_id)
+        if existing_dim and incoming_dim and existing_dim != incoming_dim:
+            raise ValueError(
+                f"dim mismatch for policy={policy_id}: existing={existing_dim} incoming={incoming_dim}"
+            )
+        dim = incoming_dim or existing_dim
+        batch = _build_record_batch(rows, dim)
 
-    if mode == "overwrite" or name not in db.table_names():
-        # overwrite 或不存在：删旧建新
-        if name in db.table_names():
-            db.drop_table(name)
-            with _table_lock:
-                _table_cache.pop(policy_id, None)
-        tbl = db.create_table(name, data=batch, schema=batch.schema)
-    else:
-        tbl = db.open_table(name)
-        if mode == "append":
-            tbl.add(batch)
-        elif mode == "merge_by_chunk_id":
-            try:
-                (
-                    tbl.merge_insert("chunk_id")
-                    .when_matched_update_all()
-                    .when_not_matched_insert_all()
-                    .execute(batch)
-                )
-            except Exception as e:
-                # LanceDB 老版本可能不支持 merge_insert，退化为 delete + add
-                logger.info("[Store] merge_insert 不可用，退化为 delete+add: %s", e)
-                ids = [str(r.chunk_id) for r in rows]
-                tbl.delete(f"chunk_id IN ({','.join(ids)})")
-                tbl.add(batch)
+        if mode == "overwrite" or name not in db.table_names():
+            # overwrite 或不存在：先清缓存释放文件句柄，再删旧建新
+            if name in db.table_names():
+                with _table_lock:
+                    _table_cache.pop(policy_id, None)
+                db.drop_table(name)
+            tbl = db.create_table(name, data=batch, schema=batch.schema)
         else:
-            raise ValueError(f"unknown upsert mode: {mode}")
+            # 始终复用缓存句柄，避免产生多个持有同一文件的 Table 对象
+            with _table_lock:
+                tbl = _table_cache.get(policy_id)
+            if tbl is None:
+                tbl = db.open_table(name)
+            if mode == "append":
+                tbl.add(batch)
+            elif mode == "merge_by_chunk_id":
+                try:
+                    (
+                        tbl.merge_insert("chunk_id")
+                        .when_matched_update_all()
+                        .when_not_matched_insert_all()
+                        .execute(batch)
+                    )
+                except Exception as e:
+                    # LanceDB 老版本可能不支持 merge_insert，退化为 delete + add
+                    logger.info("[Store] merge_insert 不可用，退化为 delete+add: %s", e)
+                    ids = [str(r.chunk_id) for r in rows]
+                    tbl.delete(f"chunk_id IN ({','.join(ids)})")
+                    tbl.add(batch)
+            else:
+                raise ValueError(f"unknown upsert mode: {mode}")
 
-    with _table_lock:
-        _table_cache[policy_id] = tbl
+        with _table_lock:
+            _table_cache[policy_id] = tbl
 
-    ensure_indexes(tbl)
-    return {
-        "written": len(rows),
-        "table_size": int(tbl.count_rows()),
-        "dim": int(dim),
-    }
+        ensure_indexes(tbl)
+        return {
+            "written": len(rows),
+            "table_size": int(tbl.count_rows()),
+            "dim": int(dim),
+        }
 
 
 # ---------------------------------------------------------------- 读取助手
