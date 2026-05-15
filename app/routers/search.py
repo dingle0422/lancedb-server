@@ -45,6 +45,9 @@ async def search(policy_id: str, body: SearchRequest) -> SearchResponse:
     )
     try:
         hits = await anyio.to_thread.run_sync(fn)
+    except KeyError:
+        # store.hybrid_search 在表不存在时抛 KeyError；显式 404 比 hits=[] 更好排障
+        raise HTTPException(status_code=404, detail=f"policy not indexed: {policy_id}")
     except Exception as e:
         logger.exception("[search] policy=%s 失败", policy_id)
         raise HTTPException(status_code=500, detail=str(e))

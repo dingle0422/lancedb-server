@@ -125,7 +125,7 @@ def _overwrite_or_create(db, policy_id: str, name: str, batch: pa.RecordBatch, d
        ─ 此时才会触发 EBUSY，已有 GC + 6 次退避兜底。
     """
 
-    table_existed = name in db.table_names()
+    table_existed = name in _all_table_names(db)
 
     if table_existed and existing_dim and dim and existing_dim == dim:
         try:
@@ -189,6 +189,43 @@ def _connect():
         return _db
 
 
+def _all_table_names(db) -> list[str]:
+    """LanceDB ``Connection.table_names`` 默认 ``limit=10``，超过 10 张表的实例
+    后续表会被静默截断 —— 进而让 :func:`table_exists` 永远返 False、新表查不到、
+    HTTP 上返 0 hits。这里翻页 / 大 limit 兜底，把所有表名一次性拿全。
+
+    LanceDB 历史版本 API 不完全一致：
+    - 0.13+：``table_names(page_token=None, limit=10)`` 支持翻页；
+    - 老版本可能不接受 ``page_token``，但接受 ``limit``；
+    - 更老的可能 ``table_names()`` 完全无参数（直接 listdir，没有截断）。
+    依次降级，保证总能拿全。
+    """
+
+    PAGE = 1000
+    try:
+        names: list[str] = []
+        page_token: str | None = None
+        while True:
+            kwargs: dict[str, Any] = {"limit": PAGE}
+            if page_token is not None:
+                kwargs["page_token"] = page_token
+            page = db.table_names(**kwargs)
+            if not page:
+                break
+            names.extend(page)
+            if len(page) < PAGE:
+                break
+            # 翻页：以最后一个 name 为下一页 token（lancedb 0.13+ 行为）
+            page_token = page[-1]
+        return names
+    except TypeError:
+        # 不支持 page_token / limit 关键字，直接给大 limit
+        try:
+            return list(db.table_names(limit=1_000_000))
+        except TypeError:
+            return list(db.table_names())
+
+
 def _table_path(policy_id: str) -> str:
     settings = get_settings()
     return os.path.join(settings.store_dir, f"{_safe_policy_dir(policy_id)}.lance")
@@ -196,7 +233,7 @@ def _table_path(policy_id: str) -> str:
 
 def table_exists(policy_id: str) -> bool:
     db = _connect()
-    return _safe_policy_dir(policy_id) in db.table_names()
+    return _safe_policy_dir(policy_id) in _all_table_names(db)
 
 
 def open_table(policy_id: str):
@@ -220,7 +257,7 @@ def drop_table(policy_id: str) -> bool:
     with write_lock:
         db = _connect()
         name = _safe_policy_dir(policy_id)
-        if name not in db.table_names():
+        if name not in _all_table_names(db):
             return False
         _evict_and_release(policy_id)
         _drop_table_with_retry(db, name)
@@ -232,7 +269,7 @@ def list_policies() -> list[tuple[str, int, int]]:
 
     db = _connect()
     out: list[tuple[str, int, int]] = []
-    for safe_name in db.table_names():
+    for safe_name in _all_table_names(db):
         pid = _decode_policy_id(safe_name)
         if not pid:
             continue
@@ -401,7 +438,7 @@ def upsert(policy_id: str, rows: list[ChunkRow], mode: str, expected_dim: int | 
         dim = incoming_dim or existing_dim
         batch = _build_record_batch(rows, dim)
 
-        if mode == "overwrite" or name not in db.table_names():
+        if mode == "overwrite" or name not in _all_table_names(db):
             tbl = _overwrite_or_create(db, policy_id, name, batch, dim, existing_dim)
         else:
             # 始终复用缓存句柄，避免产生多个持有同一文件的 Table 对象
@@ -532,10 +569,17 @@ def hybrid_search(
     include_content: bool,
     include_derived: bool,
 ) -> list[SearchHit]:
-    """BM25 + 向量并行召回，本地 RRF 融合，与主项目 ``inference/retrieval/rrf.py`` 同公式。"""
+    """BM25 + 向量并行召回，本地 RRF 融合，与主项目 ``inference/retrieval/rrf.py`` 同公式。
+
+    表不存在时显式抛 :class:`KeyError`，由路由层转成 HTTP 404。历史上这里返 ``[]``
+    会让"未建索引"和"索引存在但 0 命中"两种情况无法区分（HTTP 都是 200 hits=[]），
+    导致客户端排障极难——曾经有一例 ``table_names()`` 默认 limit=10 截断让新建表
+    永远 ``table_exists=False``，被 0 hits 静默蒙了很久。
+    """
 
     if not table_exists(policy_id):
-        return []
+        logger.warning("[search] 表不存在 policy=%s（表名未在 db.table_names 中）", policy_id)
+        raise KeyError(policy_id)
     tbl = open_table(policy_id)
     n_total = tbl.count_rows()
     if n_total == 0:

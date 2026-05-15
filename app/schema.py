@@ -94,7 +94,10 @@ UpsertMode = Literal["overwrite", "append", "merge_by_chunk_id"]
 
 
 class UpsertRequest(BaseModel):
-    chunks: list[ChunkRow]
+    # 强制至少 1 条 chunk：空列表在 store.upsert 里会被静默 noop 但 HTTP 仍返 200，
+    # 历史上让客户端误以为"建索引成功"，实际上根本没建表。直接在 schema 层拒掉，
+    # 客户端会拿到 422 + "List should have at least 1 item"，问题第一时间冒出来。
+    chunks: list[ChunkRow] = Field(..., min_length=1)
     mode: UpsertMode = "overwrite"
     expected_dim: int | None = None  # 客户端可选地校验维度
 
