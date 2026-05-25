@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     - ``ENABLE_SCALAR_INDEX``：是否在 ``kind`` / ``parent_chunk_index`` 上建标量索引。
       极小表（< 1k chunks）可关掉以省构建时间。
     - ``RRF_K``：RRF 融合常量，与主项目 ``inference/config.py::RRF_K`` 默认对齐。
+    - ``ENABLE_LEGACY_UI``：是否启用 policy 专用 Gradio（/gradio）。
+    - ``ENABLE_GENERIC_GRADIO``：是否启用通用 Gradio（/gradio-generic）。
     """
 
     store_dir: str = "./data"
@@ -24,6 +26,13 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     enable_scalar_index: bool = True
     rrf_k: int = 60
+    enable_generic_api: bool = True
+    enable_legacy_relations: bool = True
+    enable_legacy_ui: bool = True
+    enable_generic_gradio: bool = True
+    gradio_use_http: bool = False
+    gradio_api_base_url: str = ""
+    gradio_api_key: str = ""
 
     model_config = SettingsConfigDict(
         env_file=".env",

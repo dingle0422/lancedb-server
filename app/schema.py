@@ -173,6 +173,9 @@ class TableMeta(BaseModel):
     has_fts_index: bool
     built_at: int
     schema_version: int
+    schema_fields: list[dict] = Field(default_factory=list)
+    filterable_fields: list[str] = Field(default_factory=list)
+    searchable_fields: list[str] = Field(default_factory=list)
 
 
 class PolicyListItem(BaseModel):
@@ -183,3 +186,13 @@ class PolicyListItem(BaseModel):
 
 class PolicyListResponse(BaseModel):
     policies: list[PolicyListItem]
+
+
+class CapabilitiesResponse(BaseModel):
+    api_version: str
+    generic_api: bool
+    legacy_relations: bool
+    legacy_ui: bool
+    retrieval_modes: list[str]
+    schema_version: int
+    features: dict[str, bool]

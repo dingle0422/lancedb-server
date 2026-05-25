@@ -8,8 +8,8 @@ from functools import partial
 import anyio
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from .. import store
 from ..deps import require_api_key
+from ..generic import get_vector_service
 from ..schema import (
     SearchHit,
     UpsertRequest,
@@ -27,9 +27,10 @@ logger = logging.getLogger(__name__)
 
 @router.post("/chunks:upsert", response_model=UpsertResponse)
 async def upsert_chunks(policy_id: str, body: UpsertRequest) -> UpsertResponse:
+    svc = get_vector_service()
     try:
         result = await anyio.to_thread.run_sync(
-            store.upsert,
+            svc.documents.upsert_legacy,
             policy_id,
             body.chunks,
             body.mode,
@@ -50,9 +51,10 @@ async def list_chunks(
     limit: int = Query(default=1000, ge=1, le=100000),
     include_content: bool = Query(default=False),
 ) -> list[SearchHit]:
+    svc = get_vector_service()
     try:
         fn = partial(
-            store.list_chunks,
+            svc.documents.list_legacy,
             policy_id,
             where=where,
             limit=limit,
@@ -69,5 +71,6 @@ async def list_chunks(
 
 @router.delete("")
 async def drop_policy(policy_id: str) -> dict:
-    ok = await anyio.to_thread.run_sync(store.drop_table, policy_id)
+    svc = get_vector_service()
+    ok = await anyio.to_thread.run_sync(svc.collections.drop_collection, policy_id)
     return {"ok": bool(ok)}

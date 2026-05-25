@@ -1,33 +1,46 @@
-"""端到端冒烟：用临时 STORE_DIR + TestClient 跑一轮 upsert / search / expand / drop。"""
+"""端到端回归：覆盖 v1 兼容、v2 通用 API、能力协商与性能基线。"""
 
 from __future__ import annotations
 
-import os
 import tempfile
+import time
 
 import pytest
 from fastapi.testclient import TestClient
 
 
-@pytest.fixture()
-def client(monkeypatch):
+def _build_client(monkeypatch, **env_overrides) -> TestClient:
     tmp = tempfile.mkdtemp(prefix="retrieval_test_")
     monkeypatch.setenv("STORE_DIR", tmp)
     monkeypatch.setenv("API_KEY", "")  # 关闭鉴权方便测试
     monkeypatch.setenv("ENABLE_SCALAR_INDEX", "0")  # 极小表跳过标量索引省时间
+    monkeypatch.setenv("ENABLE_GENERIC_API", "1")
+    monkeypatch.setenv("ENABLE_LEGACY_RELATIONS", "1")
+    monkeypatch.setenv("ENABLE_LEGACY_UI", "1")
+    monkeypatch.setenv("ENABLE_GENERIC_GRADIO", "1")
+    monkeypatch.setenv("PROXY_ROOT_PATH", "")
+    for k, v in env_overrides.items():
+        monkeypatch.setenv(k, str(v))
 
     # config 和 store 都用 lru_cache / 模块级单例缓存，需要在 monkeypatch 后重新导入
     from importlib import reload
 
     from app import config as cfg_mod
+    from app.generic import core as generic_core_mod
     from app import store as store_mod
     from app import main as main_mod
 
     reload(cfg_mod)
     reload(store_mod)
+    reload(generic_core_mod)
     reload(main_mod)
 
-    with TestClient(main_mod.app) as c:
+    return TestClient(main_mod.app)
+
+
+@pytest.fixture()
+def client(monkeypatch):
+    with _build_client(monkeypatch) as c:
         yield c
 
 
@@ -154,3 +167,193 @@ def test_full_lifecycle(client: TestClient):
 
     # 8) drop 后 meta 404
     assert client.get(f"/v1/policies/{pid}/meta").status_code == 404
+
+
+def test_v1_contract_shape(client: TestClient):
+    pid = "contract_pid"
+    upsert_resp = client.post(
+        f"/v1/policies/{pid}/chunks:upsert",
+        json={"chunks": _make_chunks(), "mode": "overwrite", "expected_dim": 4},
+    )
+    assert upsert_resp.status_code == 200
+    assert set(upsert_resp.json().keys()) == {"written", "table_size", "dim"}
+
+    meta_resp = client.get(f"/v1/policies/{pid}/meta")
+    assert meta_resp.status_code == 200
+    meta = meta_resp.json()
+    assert {"policy_id", "n_chunks", "n_original", "n_derived", "dim", "schema_version"} <= set(meta.keys())
+    assert isinstance(meta.get("schema_fields", []), list)
+    assert isinstance(meta.get("filterable_fields", []), list)
+    assert isinstance(meta.get("searchable_fields", []), list)
+
+    search_resp = client.post(
+        f"/v1/policies/{pid}/search",
+        json={
+            "query_tokenized": "萝卜",
+            "query_vector": [0.0, 1.0, 0.0, 0.0],
+            "top_n": 5,
+            "top_m": 5,
+            "include_content": True,
+        },
+    )
+    assert search_resp.status_code == 200
+    body = search_resp.json()
+    assert set(body.keys()) == {"hits"}
+    if body["hits"]:
+        must_have = {
+            "chunk_id",
+            "score",
+            "content",
+            "heading_paths",
+            "directories",
+            "kind",
+            "parent_chunk_index",
+            "derived_seq",
+            "relation_keys",
+            "hop_depth",
+            "source",
+            "clause_id",
+        }
+        assert must_have <= set(body["hits"][0].keys())
+
+
+def test_capabilities_endpoint(client: TestClient):
+    resp = client.get("/v1/capabilities")
+    assert resp.status_code == 200
+    caps = resp.json()
+    assert caps["generic_api"] is True
+    assert caps["legacy_relations"] is True
+    assert "legacy_hybrid" in caps["retrieval_modes"]
+    assert isinstance(caps["features"], dict)
+
+    resp_v2 = client.get("/v2/capabilities")
+    assert resp_v2.status_code == 200
+    assert resp_v2.json()["schema_version"] == caps["schema_version"]
+
+
+def test_v2_collection_flow(client: TestClient):
+    cid = "generic_collection_1"
+    docs = [
+        {
+            "document_id": 101,
+            "content": "vector database general platform",
+            "content_tokenized": "vector database general platform",
+            "vector": [0.1, 0.2, 0.3, 0.4],
+            "metadata": {"kind": "original", "directories": ["docs"], "hop_depth": 0},
+        },
+        {
+            "document_id": 102,
+            "content": "hybrid retrieval with rrf",
+            "content_tokenized": "hybrid retrieval with rrf",
+            "vector": [0.0, 1.0, 0.0, 0.0],
+            "metadata": {"kind": "derived", "parent_chunk_index": 101, "hop_depth": 1},
+        },
+    ]
+    upsert = client.post(
+        f"/v2/collections/{cid}/documents:upsert",
+        json={"documents": docs, "mode": "overwrite", "expected_dim": 4},
+    )
+    assert upsert.status_code == 200, upsert.text
+    assert upsert.json()["written"] == 2
+
+    upsert_alias = client.post(
+        "/v2/documents:upsert",
+        json={"collection_id": cid, "documents": docs, "mode": "merge_by_chunk_id", "expected_dim": 4},
+    )
+    assert upsert_alias.status_code == 200
+
+    lst = client.get("/v2/collections")
+    assert lst.status_code == 200
+    assert any(x["collection_id"] == cid for x in lst.json()["collections"])
+
+    meta = client.get(f"/v2/collections/{cid}/meta")
+    assert meta.status_code == 200
+    assert meta.json()["n_documents"] == 2
+    assert isinstance(meta.json()["schema_fields"], list)
+
+    docs_resp = client.get(f"/v2/collections/{cid}/documents", params={"include_content": "true"})
+    assert docs_resp.status_code == 200
+    returned_docs = docs_resp.json()["documents"]
+    assert any(d["document_id"] == 101 for d in returned_docs)
+
+    docs_alias = client.get("/v2/documents", params={"collection_id": cid, "include_content": "true"})
+    assert docs_alias.status_code == 200
+    assert any(d["document_id"] == 101 for d in docs_alias.json()["documents"])
+
+    search = client.post(
+        f"/v2/collections/{cid}/search",
+        json={
+            "query_tokenized": "hybrid retrieval",
+            "query_vector": [0.0, 1.0, 0.0, 0.0],
+            "top_n": 5,
+            "top_m": 5,
+            "include_content": True,
+            "strategy": "legacy_hybrid",
+        },
+    )
+    assert search.status_code == 200, search.text
+    assert any(h["document_id"] == 102 for h in search.json()["hits"])
+
+    search_alias = client.post(
+        "/v2/search",
+        json={
+            "collection_id": cid,
+            "query_tokenized": "hybrid retrieval",
+            "query_vector": [0.0, 1.0, 0.0, 0.0],
+            "top_n": 5,
+            "top_m": 5,
+            "include_content": True,
+            "strategy": "legacy_hybrid",
+        },
+    )
+    assert search_alias.status_code == 200
+    assert any(h["document_id"] == 102 for h in search_alias.json()["hits"])
+
+
+def test_disable_relations_flag(monkeypatch):
+    with _build_client(monkeypatch, ENABLE_LEGACY_RELATIONS=0) as c:
+        resp = c.get(
+            "/v1/relations:lookup-dependents",
+            params={"target_policy_id": "OTHER_POL"},
+        )
+        assert resp.status_code == 404
+
+
+def test_search_performance_baseline(client: TestClient):
+    pid = "perf_pid"
+    client.post(
+        f"/v1/policies/{pid}/chunks:upsert",
+        json={"chunks": _make_chunks(), "mode": "overwrite", "expected_dim": 4},
+    )
+
+    elapsed = []
+    for _ in range(8):
+        t0 = time.perf_counter()
+        resp = client.post(
+            f"/v1/policies/{pid}/search",
+            json={
+                "query_tokenized": "萝卜 免税",
+                "query_vector": [0.0, 1.0, 0.0, 0.0],
+                "top_n": 5,
+                "top_m": 5,
+                "include_content": True,
+            },
+        )
+        assert resp.status_code == 200
+        elapsed.append(time.perf_counter() - t0)
+
+    p95_like = sorted(elapsed)[int(len(elapsed) * 0.95) - 1]
+    assert p95_like < 2.0
+
+
+def test_frontend_routes(client: TestClient):
+    # 旧版静态 UI 已移除
+    assert client.get("/ui").status_code == 404
+
+    # 保留 policy gradio
+    legacy = client.get("/gradio")
+    assert legacy.status_code in (200, 307)
+
+    # 新增 generic gradio
+    generic = client.get("/gradio-generic")
+    assert generic.status_code in (200, 307)

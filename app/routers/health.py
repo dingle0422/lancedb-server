@@ -14,5 +14,5 @@ async def healthz() -> dict:
     return {"ok": True, "version": __version__}
 
 @router.get("/example")
-async def healthz() -> dict:
+async def example() -> dict:
     return {"ok": True, "version": __version__}

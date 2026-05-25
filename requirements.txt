@@ -5,6 +5,7 @@ fastapi>=0.111
 uvicorn[standard]>=0.30
 pydantic>=2.7
 pydantic-settings>=2.3
+eval-type-backport>=0.3
 anyio>=4.4
 structlog>=24.1
 gradio>=4.40

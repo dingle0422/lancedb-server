@@ -1,7 +1,7 @@
 [project]
 name = "retrieval-service"
-version = "0.1.0"
-description = "LanceDB-backed retrieval microservice (BM25 + vector + RRF) for page-know-how"
+version = "0.2.0"
+description = "LanceDB-backed retrieval microservice (legacy v1 + generic v2 vector APIs)"
 requires-python = ">=3.10"
 dependencies = [
   "lancedb>=0.13",
@@ -10,6 +10,7 @@ dependencies = [
   "uvicorn[standard]>=0.30",
   "pydantic>=2.7",
   "pydantic-settings>=2.3",
+  "eval-type-backport>=0.3",
   "anyio>=4.4",
   "structlog>=24.1",
   "gradio>=4.40",

@@ -8,15 +8,13 @@ from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
-from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
-from fastapi.staticfiles import StaticFiles
 
+from . import __version__
 from .config import get_settings
-from .routers import chunks, health, meta, relations, search
+from .routers import chunks, health, meta, relations, search, v2
 
 
 def _configure_logging(level: str) -> None:
@@ -42,9 +40,9 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="page-know-how retrieval service",
-    description="LanceDB 驱动的 BM25 + 向量混合检索微服务（每 policy 一张表）。",
-    version="0.1.0",
+    title="lancedb retrieval service",
+    description="LanceDB 驱动的向量/全文混合检索服务（兼容 legacy policy API + generic collection API）。",
+    version=__version__,
     lifespan=lifespan,
 )
 
@@ -59,28 +57,29 @@ app.add_middleware(
 app.include_router(health.router)
 app.include_router(chunks.router)
 app.include_router(search.router)
-app.include_router(relations.router)
 app.include_router(meta.router)
+_settings = get_settings()
+if _settings.enable_legacy_relations:
+    app.include_router(relations.router)
+if _settings.enable_generic_api:
+    app.include_router(v2.router)
 
-_STATIC_DIR = Path(__file__).parent / "static"
-if _STATIC_DIR.exists():
-    app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
-
-
-@app.get("/ui", include_in_schema=False)
-async def web_ui() -> FileResponse:
-    return FileResponse(_STATIC_DIR / "ui.html")
-
-
-# ---- Gradio 前端（Lance Data Viewer 风格），同进程挂载到 /gradio ----
+# ---- Gradio 前端：policy(legacy) 与 generic(v2) 双界面 ----
 # 反向代理前缀通过 uvicorn 的 --root-path（ASGI scope.root_path）传入，详见 main.py。
 try:
     import gradio as gr  # type: ignore
 
-    from .ui_gradio import build_demo
+    if _settings.enable_legacy_ui:
+        from .ui_gradio import build_demo
 
-    app = gr.mount_gradio_app(app, build_demo(), path="/gradio")
-    logging.getLogger(__name__).info("Gradio mounted at /gradio/")
+        app = gr.mount_gradio_app(app, build_demo(), path="/gradio")
+        logging.getLogger(__name__).info("Policy Gradio mounted at /gradio/")
+
+    if _settings.enable_generic_gradio and _settings.enable_generic_api:
+        from .ui_gradio_generic import build_generic_demo
+
+        app = gr.mount_gradio_app(app, build_generic_demo(), path="/gradio-generic")
+        logging.getLogger(__name__).info("Generic Gradio mounted at /gradio-generic/")
 
 except Exception as _gradio_exc:  # noqa: BLE001
     logging.getLogger(__name__).warning(

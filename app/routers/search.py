@@ -13,9 +13,9 @@ from functools import partial
 import anyio
 from fastapi import APIRouter, Depends, HTTPException
 
-from .. import store
 from ..config import get_settings
 from ..deps import require_api_key
+from ..generic import get_vector_service
 from ..schema import SearchRequest, SearchResponse
 
 router = APIRouter(
@@ -29,10 +29,11 @@ logger = logging.getLogger(__name__)
 
 @router.post("/search", response_model=SearchResponse)
 async def search(policy_id: str, body: SearchRequest) -> SearchResponse:
+    svc = get_vector_service()
     settings = get_settings()
     rrf_k = body.rrf_k if body.rrf_k is not None else settings.rrf_k
     fn = partial(
-        store.hybrid_search,
+        svc.retrieval.search_legacy,
         policy_id,
         query_tokenized=body.query_tokenized,
         query_vector=body.query_vector,
@@ -46,7 +47,7 @@ async def search(policy_id: str, body: SearchRequest) -> SearchResponse:
     try:
         hits = await anyio.to_thread.run_sync(fn)
     except KeyError:
-        # store.hybrid_search 在表不存在时抛 KeyError；显式 404 比 hits=[] 更好排障
+        # legacy_hybrid 在表不存在时抛 KeyError；显式 404 比 hits=[] 更好排障
         raise HTTPException(status_code=404, detail=f"policy not indexed: {policy_id}")
     except Exception as e:
         logger.exception("[search] policy=%s 失败", policy_id)

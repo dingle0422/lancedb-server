@@ -12,13 +12,150 @@ from __future__ import annotations
 import json
 import logging
 import os
+from urllib.parse import quote
 from typing import Any
 
 import gradio as gr
 
+from .config import get_settings
 from . import store
 
 logger = logging.getLogger(__name__)
+
+_SETTINGS = get_settings()
+_GRADIO_HTTP_MODE = bool(_SETTINGS.gradio_use_http)
+_GRADIO_HTTP_BASE_URL = (_SETTINGS.gradio_api_base_url or "").rstrip("/")
+_GRADIO_HTTP_API_KEY = _SETTINGS.gradio_api_key or _SETTINGS.api_key or ""
+
+
+def _http_request(
+    method: str,
+    path: str,
+    *,
+    params: dict[str, Any] | None = None,
+    json_body: dict[str, Any] | None = None,
+    allow_not_found: bool = False,
+) -> dict | list | None:
+    if not _GRADIO_HTTP_BASE_URL:
+        raise RuntimeError("GRADIO_API_BASE_URL 未配置，无法启用 HTTP 模式")
+
+    import httpx
+
+    headers: dict[str, str] = {"Content-Type": "application/json"}
+    if _GRADIO_HTTP_API_KEY:
+        headers["X-API-Key"] = _GRADIO_HTTP_API_KEY
+
+    url = f"{_GRADIO_HTTP_BASE_URL}{path}"
+    with httpx.Client(timeout=20.0) as client:
+        resp = client.request(method.upper(), url, headers=headers, params=params, json=json_body)
+    if allow_not_found and resp.status_code == 404:
+        return None
+    if resp.status_code >= 400:
+        raise RuntimeError(f"{method.upper()} {path} failed: {resp.status_code} {resp.text[:200]}")
+    if not resp.text:
+        return {}
+    return resp.json()
+
+
+def _normalize_hit_dict(hit: Any) -> dict[str, Any]:
+    if isinstance(hit, dict):
+        return hit
+    if hasattr(hit, "model_dump"):
+        return hit.model_dump()
+    return dict(hit)
+
+
+def _svc_list_policies() -> list[tuple[str, int, int]]:
+    if not _GRADIO_HTTP_MODE:
+        return store.list_policies()
+    payload = _http_request("GET", "/v1/policies")
+    raw = (payload or {}).get("policies", []) if isinstance(payload, dict) else []
+    return [
+        (
+            str(item.get("policy_id", "")),
+            int(item.get("n_chunks", 0)),
+            int(item.get("dim", 0)),
+        )
+        for item in raw
+        if item.get("policy_id")
+    ]
+
+
+def _svc_table_meta(policy_id: str) -> dict:
+    if not _GRADIO_HTTP_MODE:
+        return store.table_meta(policy_id)
+    payload = _http_request(
+        "GET",
+        f"/v1/policies/{quote(policy_id, safe='')}/meta",
+        allow_not_found=True,
+    )
+    if not payload:
+        return {}
+    return dict(payload)
+
+
+def _svc_list_chunks(
+    policy_id: str,
+    *,
+    where: str | None,
+    limit: int,
+    include_content: bool,
+) -> list[dict[str, Any]]:
+    if not _GRADIO_HTTP_MODE:
+        rows = store.list_chunks(
+            policy_id,
+            where=where,
+            limit=limit,
+            include_content=include_content,
+        )
+        return [_normalize_hit_dict(r) for r in rows]
+    params: dict[str, Any] = {
+        "limit": int(limit),
+        "include_content": "true" if include_content else "false",
+    }
+    if where:
+        params["where"] = where
+    payload = _http_request(
+        "GET",
+        f"/v1/policies/{quote(policy_id, safe='')}/chunks",
+        params=params,
+        allow_not_found=True,
+    )
+    if payload is None:
+        return []
+    return [_normalize_hit_dict(r) for r in (payload or [])]
+
+
+def _svc_search(policy_id: str, body: dict[str, Any]) -> list[dict[str, Any]]:
+    if not _GRADIO_HTTP_MODE:
+        rows = store.hybrid_search(
+            policy_id,
+            query_tokenized=body.get("query_tokenized", ""),
+            query_vector=body.get("query_vector", []),
+            top_n=int(body.get("top_n", 20)),
+            top_m=int(body.get("top_m", 20)),
+            rrf_k=int(body.get("rrf_k", 60)),
+            where=body.get("where"),
+            include_content=bool(body.get("include_content", True)),
+            include_derived=bool(body.get("include_derived", True)),
+        )
+        return [_normalize_hit_dict(r) for r in rows]
+    payload = _http_request(
+        "POST",
+        f"/v1/policies/{quote(policy_id, safe='')}/search",
+        json_body=body,
+        allow_not_found=True,
+    )
+    if payload is None:
+        return []
+    return [_normalize_hit_dict(r) for r in (payload.get("hits", []) if isinstance(payload, dict) else [])]
+
+
+def _svc_drop_policy(policy_id: str) -> bool:
+    if not _GRADIO_HTTP_MODE:
+        return bool(store.drop_table(policy_id))
+    payload = _http_request("DELETE", f"/v1/policies/{quote(policy_id, safe='')}")
+    return bool((payload or {}).get("ok")) if isinstance(payload, dict) else False
 
 
 # ---------------------------------------------------------------- 查询侧：分词 + embedding
@@ -64,16 +201,16 @@ def _tokenize_query(text: str) -> str:
     return " ".join(t for t in re.split(r"[\s\W_]+", text.lower()) if t)
 
 
-_DEFAULT_EMBEDDING_BASE_URL = "http://mlp.paas.dc.servyou-it.com/qwen3-embedding/v1"
-_DEFAULT_EMBEDDING_MODEL = "qwen3-embedding"
+_DEFAULT_EMBEDDING_BASE_URL = ""
+_DEFAULT_EMBEDDING_MODEL = ""
 
 
 def _embed_query(text: str) -> tuple[list[float], str]:
     """OpenAI 兼容 embedding（`{EMBEDDING_BASE_URL}/embeddings`）。
 
-    默认指向公司内网 Qwen3-Embedding (1024 维)；可通过环境变量覆盖：
-        EMBEDDING_BASE_URL  默认 http://mlp.paas.dc.servyou-it.com/qwen3-embedding/v1
-        EMBEDDING_MODEL     默认 qwen3-embedding
+    默认不启用 embedding，避免耦合特定内网环境；可通过环境变量显式配置：
+        EMBEDDING_BASE_URL
+        EMBEDDING_MODEL
         EMBEDDING_API_KEY   可空
     任何一项显式设为空字符串都视作"未配置"，自动降级 BM25-only。
     """
@@ -138,12 +275,12 @@ def _vector_sparkline(vec: list[float] | None) -> str:
 
 
 def _list_policies_choices() -> list[tuple[str, str]]:
-    items = store.list_policies()
+    items = _svc_list_policies()
     return [(f"{pid}  ({n} rows · dim={dim})", pid) for pid, n, dim in items]
 
 
 def _refresh_dataset_list():
-    items = store.list_policies()
+    items = _svc_list_policies()
     rows = [[pid, n, dim] for pid, n, dim in items]
     choices = [pid for pid, _n, _dim in items]
     selected = choices[0] if choices else None
@@ -156,7 +293,7 @@ def _refresh_dataset_list():
 def _load_meta(policy_id: str | None):
     if not policy_id:
         return "_(未选择 dataset)_", []
-    meta = store.table_meta(policy_id)
+    meta = _svc_table_meta(policy_id)
     if not meta:
         return f"_(找不到 dataset `{policy_id}`)_", []
 
@@ -171,14 +308,24 @@ def _load_meta(policy_id: str | None):
     )
 
     # schema 行：列名 / pyarrow 类型 / 是否可空
-    try:
-        tbl = store.open_table(policy_id)
-        schema = tbl.schema
-        schema_rows = [
-            [f.name, str(f.type), "Y" if f.nullable else "N"] for f in schema
-        ]
-    except Exception as e:  # noqa: BLE001
-        schema_rows = [["<error>", str(e), ""]]
+    schema_rows = []
+    for field in meta.get("schema_fields", []):
+        schema_rows.append(
+            [
+                field.get("name", ""),
+                field.get("type", ""),
+                "Y" if field.get("nullable", True) else "N",
+            ]
+        )
+    if not schema_rows and not _GRADIO_HTTP_MODE:
+        try:
+            tbl = store.open_table(policy_id)
+            schema = tbl.schema
+            schema_rows = [
+                [f.name, str(f.type), "Y" if f.nullable else "N"] for f in schema
+            ]
+        except Exception as e:  # noqa: BLE001
+            schema_rows = [["<error>", str(e), ""]]
 
     return md, schema_rows
 
@@ -210,35 +357,19 @@ def _browse_rows(
     offset = (page - 1) * page_size
 
     try:
-        if not store.table_exists(policy_id):
-            return gr.update(value=[], headers=[]), f"dataset `{policy_id}` 不存在", ""
-        tbl = store.open_table(policy_id)
-        cols = [
-            "chunk_id",
-            "kind",
-            "parent_chunk_index",
-            "derived_seq",
-            "source",
-            "clause_id",
-            "hop_depth",
-            "heading_paths",
-            "directories",
-            "relation_keys",
-            "built_at",
-        ]
-        if include_content:
-            cols.append("content")
-        if show_vector:
-            cols.append("vector")
-
-        q = tbl.search().select(cols)
-        if where.strip():
-            q = q.where(where.strip())
-        rows_raw = q.limit(offset + page_size).to_list()
+        rows_raw = _svc_list_chunks(
+            policy_id,
+            where=where.strip() or None,
+            limit=offset + page_size,
+            include_content=include_content,
+        )
     except Exception as e:  # noqa: BLE001
         return gr.update(value=[], headers=[]), f"❌ 查询失败: {e}", ""
 
-    page_rows = rows_raw[offset : offset + page_size]
+    if not rows_raw:
+        return gr.update(value=[], headers=[]), "无数据", "[]"
+
+    page_rows = rows_raw[offset: offset + page_size]
 
     headers = [
         "chunk_id",
@@ -281,7 +412,7 @@ def _browse_rows(
         if include_content:
             row.append(_stringify(r.get("content")))
         if show_vector:
-            # vector 列展示 sparkline，完整向量太长不放表里（可在下方 JSON 区看到）
+            # HTTP 模式下默认列表接口不返回 vector，这里会展示为空字符串。
             row.append(_vector_sparkline(r.get("vector")))
         table.append(row)
 
@@ -292,6 +423,8 @@ def _browse_rows(
         f"page {page} · 本页 {len(page_rows)} 行 · 已扫描 {len(rows_raw)} 行"
         + (f" · where: `{where.strip()}`" if where.strip() else "")
     )
+    if _GRADIO_HTTP_MODE and show_vector:
+        info += " · HTTP 模式下 vector 预览可能为空"
     return gr.update(value=table, headers=headers), info, raw_json
 
 
@@ -327,8 +460,8 @@ def _do_search(
     if skip_embedding:
         notes.append("⏭ 跳过 embedding，仅 BM25")
     else:
-        # 维度预检：拿表上的 dim，向 embedding 之后做一次校验
-        expected_dim = store._existing_dim(policy_id) if store.table_exists(policy_id) else 0  # noqa: SLF001
+        # 维度预检：通过 meta 获取表维度，向 embedding 之后做一次校验
+        expected_dim = int((_svc_table_meta(policy_id) or {}).get("dim", 0))
         qv, err = _embed_query(query_text)
         if err:
             notes.append(f"⚠️ {err} → 降级为 BM25-only")
@@ -343,30 +476,33 @@ def _do_search(
 
     # 3) 调存储层混合检索
     try:
-        hits = store.hybrid_search(
+        hits = _svc_search(
             policy_id,
-            query_tokenized=tokenized,
-            query_vector=qv,
-            top_n=int(top_n or 0),
-            top_m=int(top_m or 0),
-            rrf_k=int(rrf_k or 60),
-            where=where.strip() or None,
-            include_content=True,
-            include_derived=bool(include_derived),
+            {
+                "query_tokenized": tokenized,
+                "query_vector": qv,
+                "top_n": int(top_n or 0),
+                "top_m": int(top_m or 0),
+                "rrf_k": int(rrf_k or 60),
+                "where": where.strip() or None,
+                "include_content": True,
+                "include_derived": bool(include_derived),
+            },
         )
     except Exception as e:  # noqa: BLE001
         return [], f"❌ search 失败: {e}", ""
 
     rows = []
     for h in hits:
+        hd = _normalize_hit_dict(h)
         rows.append([
-            h.chunk_id,
-            round(h.score, 6),
-            h.kind,
-            h.parent_chunk_index,
-            h.source,
-            h.clause_id,
-            h.content or "",  # 不截断
+            hd.get("chunk_id", ""),
+            round(float(hd.get("score", 0.0)), 6),
+            hd.get("kind", ""),
+            hd.get("parent_chunk_index", -1),
+            hd.get("source", ""),
+            hd.get("clause_id", ""),
+            hd.get("content", "") or "",  # 不截断
         ])
 
     info_md = (
@@ -374,7 +510,7 @@ def _do_search(
         + "\n".join(f"- {n}" for n in notes)
     )
     raw_json = json.dumps(
-        [h.model_dump() if hasattr(h, "model_dump") else dict(h) for h in hits],
+        [_normalize_hit_dict(h) for h in hits],
         ensure_ascii=False,
         indent=2,
         default=str,
@@ -393,9 +529,9 @@ def _drop_policy(policy_id: str | None, confirm: str):
             f"⚠️ 取消：请在确认框输入完整 dataset 名 `{policy_id}` 才会删除",
             gr.update(),
         )
-    ok = store.drop_table(policy_id)
+    ok = _svc_drop_policy(policy_id)
     msg = f"✅ 已删除 `{policy_id}`" if ok else f"❌ `{policy_id}` 不存在"
-    items = store.list_policies()
+    items = _svc_list_policies()
     choices = [pid for pid, _n, _dim in items]
     return msg, gr.update(choices=choices, value=(choices[0] if choices else None))
 
@@ -404,7 +540,7 @@ def _drop_policy(policy_id: str | None, confirm: str):
 
 
 def build_demo() -> gr.Blocks:
-    initial = store.list_policies()
+    initial = _svc_list_policies()
     initial_choices = [pid for pid, _n, _dim in initial]
     initial_rows = [[pid, n, dim] for pid, n, dim in initial]
 
@@ -414,7 +550,11 @@ def build_demo() -> gr.Blocks:
     ) as demo:
         gr.Markdown(
             "# Lance Data Viewer\n"
-            "_最低成本前端 · Gradio 同进程挂载 · 直接读 LanceDB_"
+            "_最低成本前端 · Gradio 同进程挂载 · 支持 direct/http 双模式_"
+        )
+        gr.Markdown(
+            f"- 当前运行模式: **{'HTTP API' if _GRADIO_HTTP_MODE else 'Direct Store'}**\n"
+            f"- HTTP Base URL: `{_GRADIO_HTTP_BASE_URL or '(未配置)'}`"
         )
 
         with gr.Row():
