@@ -77,6 +77,8 @@ http://127.0.0.1:5000/gradio-generic/   # 通用 collection/document 界面（v2
     | `EMBEDDING_MODEL` | 空 | 必须与索引时向量维度一致 |
     | `EMBEDDING_API_KEY` | 空 | 可选 |
 
+    上述环境变量可以直接在 shell 里 `export` / `$env:` 设置，也可以写到仓库根目录的 `.env` 文件（参考 `.env.example`）。服务启动时 `app/main.py` 会 `load_dotenv()` 把 `.env` 注入 `os.environ`，所以 Gradio 与裸 `uvicorn app.main:app` 两种启动方式都生效。
+
     Tab 内还提供了「跳过 embedding（仅 BM25）」复选框，方便快速跑纯 BM25 调试；维度不匹配时也会自动降级到 BM25-only 并在结果区显示告警。
   - **Danger** tab：二次确认后删除 dataset
 - **反向代理前缀**：通过环境变量 `PROXY_ROOT_PATH` 配置（默认 `/kh-lancedb`，匹配当前线上代理），它会被传给 uvicorn 作为 ASGI `root_path`。Gradio 6 会自动从 ASGI scope 读取并把这个前缀加到 HTML `<config>` 的 `root` 字段里，所以浏览器后续的 API 请求会带上 `/kh-lancedb` 前缀。
@@ -120,6 +122,8 @@ docker compose up -d --build
 ## API 概览
 
 所有接口需带 `X-API-Key: <API_KEY>` 或 `Authorization: Bearer <API_KEY>` 头；当 `API_KEY` 为空时关闭鉴权（仅本地开发）。
+
+对接 v2 通用能力（collection/document/search）建议直接参考：`docs/v2_api.md`。
 
 | 方法 | 路径 | 用途 |
 |---|---|---|

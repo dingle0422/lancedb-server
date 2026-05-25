@@ -10,6 +10,7 @@ dependencies = [
   "uvicorn[standard]>=0.30",
   "pydantic>=2.7",
   "pydantic-settings>=2.3",
+  "python-dotenv>=1.0",
   "eval-type-backport>=0.3",
   "anyio>=4.4",
   "structlog>=24.1",

@@ -9,6 +9,16 @@ from __future__ import annotations
 import logging
 from contextlib import asynccontextmanager
 
+# 必须在导入任何会读 os.environ 的模块（含 .config / .ui_gradio*）之前先把 .env
+# 灌进 os.environ。pydantic-settings 默认只把 .env 中“Settings 已声明”的字段加到
+# Settings 实例上，不会写回 os.environ；而 Gradio UI 里的 _embed_query() 是直接
+# os.environ.get("EMBEDDING_BASE_URL") 取值，所以这里必须显式 load_dotenv。
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+load_dotenv(Path(__file__).resolve().parent.parent / ".env", override=False)
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
