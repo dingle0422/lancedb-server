@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 import time
 from typing import Any
@@ -10,6 +12,7 @@ from ..schema import ChunkRow, RelationKey, SearchHit
 from ..schema_generic import GenericDocumentInput, GenericDocumentRecord, SchemaField
 
 _TOKEN_SPLIT_RE = re.compile(r"[\s\W_]+")
+_METADATA_KEY_RE = re.compile(r"[^0-9a-zA-Z_]+")
 
 
 def policy_to_collection(policy_id: str) -> str:
@@ -61,10 +64,77 @@ def _normalize_relation_keys(value: Any) -> list[RelationKey]:
     return out
 
 
+def _to_int(value: Any, default: int) -> int:
+    try:
+        if value is None:
+            return default
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _normalize_kind(value: Any) -> str:
+    if isinstance(value, str) and value.lower() == "derived":
+        return "derived"
+    return "original"
+
+
+def _serialize_metadata(value: Any) -> str:
+    try:
+        return json.dumps(value, ensure_ascii=False)
+    except (TypeError, ValueError):
+        return "{}"
+
+
+def _sanitize_metadata_segment(seg: str) -> str:
+    s = _METADATA_KEY_RE.sub("_", seg.lower().strip())
+    s = s.strip("_")
+    return s or "field"
+
+
+def _metadata_path_to_column(path: tuple[str, ...]) -> str:
+    readable = "__".join(_sanitize_metadata_segment(seg) for seg in path) if path else "root"
+    raw = ".".join(path) if path else "$"
+    digest = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:8]
+    return f"md_{readable}_{digest}"
+
+
+def _flatten_metadata_leaves(value: Any, *, path: tuple[str, ...] = ()) -> dict[tuple[str, ...], Any]:
+    if isinstance(value, dict):
+        out: dict[tuple[str, ...], Any] = {}
+        for k, v in value.items():
+            out.update(_flatten_metadata_leaves(v, path=path + (str(k),)))
+        return out
+    if isinstance(value, list):
+        out: dict[tuple[str, ...], Any] = {}
+        for idx, item in enumerate(value):
+            out.update(_flatten_metadata_leaves(item, path=path + (str(idx),)))
+        return out
+    if path:
+        return {path: value}
+    return {}
+
+
+def _extract_metadata_scalars(value: Any) -> dict[str, Any]:
+    root_path = () if isinstance(value, dict) else ("root",)
+    leaves = _flatten_metadata_leaves(value, path=root_path)
+    out: dict[str, Any] = {}
+    for path, leaf in leaves.items():
+        col = _metadata_path_to_column(path)
+        if isinstance(leaf, (bool, int, float, str)) or leaf is None:
+            out[col] = leaf
+            continue
+        # 复杂对象已经被递归拆开；仅兜底无法拆分的自定义对象为字符串
+        out[col] = str(leaf)
+    return out
+
+
 def document_to_chunk_row(doc: GenericDocumentInput) -> ChunkRow:
     """把通用文档模型映射到当前 LanceDB 固定表结构。"""
 
-    md = doc.metadata or {}
+    raw_md = doc.metadata
+    md = raw_md if isinstance(raw_md, dict) else {}
+    metadata_scalars = _extract_metadata_scalars(raw_md)
     now_ms = int(time.time() * 1000)
     tokenized = (doc.content_tokenized or "").strip() or _fallback_tokenize(doc.content)
     return ChunkRow(
@@ -74,19 +144,21 @@ def document_to_chunk_row(doc: GenericDocumentInput) -> ChunkRow:
         vector=list(doc.vector or []),
         heading_paths=_normalize_heading_paths(md.get("heading_paths")),
         directories=_normalize_str_list(md.get("directories")),
-        kind=str(md.get("kind", "original") or "original"),
-        parent_chunk_index=int(md.get("parent_chunk_index", -1) or -1),
-        derived_seq=int(md.get("derived_seq", 0) or 0),
+        kind=_normalize_kind(md.get("kind")),
+        parent_chunk_index=_to_int(md.get("parent_chunk_index"), -1),
+        derived_seq=_to_int(md.get("derived_seq"), 0),
         relation_keys=_normalize_relation_keys(md.get("relation_keys")),
-        hop_depth=int(md.get("hop_depth", 0) or 0),
+        hop_depth=_to_int(md.get("hop_depth"), 0),
         source=str(md.get("source", "") or ""),
         clause_id=str(md.get("clause_id", "") or ""),
-        built_at=int(md.get("built_at", now_ms) or now_ms),
+        metadata_json=_serialize_metadata(raw_md),
+        metadata_scalars=metadata_scalars,
+        built_at=_to_int(md.get("built_at"), now_ms),
     )
 
 
 def hit_to_generic_document(hit: SearchHit) -> GenericDocumentRecord:
-    metadata = {
+    fallback_metadata = {
         "heading_paths": hit.heading_paths,
         "directories": hit.directories,
         "kind": hit.kind,
@@ -97,6 +169,13 @@ def hit_to_generic_document(hit: SearchHit) -> GenericDocumentRecord:
         "source": hit.source,
         "clause_id": hit.clause_id,
     }
+    metadata: Any = fallback_metadata
+    if hit.metadata_json:
+        try:
+            metadata = json.loads(hit.metadata_json)
+        except (TypeError, ValueError):
+            metadata = fallback_metadata
+
     return GenericDocumentRecord(
         document_id=hit.chunk_id,
         score=float(hit.score),

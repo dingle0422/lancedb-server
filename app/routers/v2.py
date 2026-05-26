@@ -12,6 +12,8 @@ from ..deps import require_api_key
 from ..generic import get_vector_service
 from ..schema_generic import (
     CapabilitiesResponse,
+    CollectionOverwriteByPrefixRequest,
+    CollectionOverwriteByPrefixResponse,
     CollectionListItem,
     CollectionListResponse,
     CollectionMeta,
@@ -131,6 +133,34 @@ async def upsert_documents_alias(body: DocumentUpsertRequestWithCollection) -> D
             expected_dim=body.expected_dim,
         ),
     )
+
+
+@router.post(
+    "/collectionOverwriteByPrefix",
+    response_model=CollectionOverwriteByPrefixResponse,
+)
+async def collection_overwrite_by_prefix(
+    body: CollectionOverwriteByPrefixRequest,
+) -> CollectionOverwriteByPrefixResponse:
+    svc = get_vector_service()
+
+    def _run() -> dict:
+        dropped = svc.collections.drop_collections_with_same_prefix(body.collection_id)
+        result = svc.documents.upsert_documents(
+            body.collection_id,
+            body.documents,
+            "overwrite",
+            body.expected_dim,
+        )
+        return {**result, "dropped_collections": dropped}
+
+    try:
+        result = await anyio.to_thread.run_sync(_run)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"collection overwrite by prefix failed: {e}")
+    return CollectionOverwriteByPrefixResponse(**result)
 
 
 @router.post("/collections/{collection_id}/search", response_model=SearchResponseV2)

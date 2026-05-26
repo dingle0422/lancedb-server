@@ -310,6 +310,203 @@ def test_v2_collection_flow(client: TestClient):
     assert any(h["document_id"] == 102 for h in search_alias.json()["hits"])
 
 
+def test_v2_metadata_roundtrip_accepts_arbitrary_shapes(client: TestClient):
+    cid = "generic_collection_metadata_shape"
+    docs = [
+        {
+            "document_id": 201,
+            "content": "metadata arbitrary fields",
+            "content_tokenized": "metadata arbitrary fields",
+            "vector": [0.2, 0.1, 0.3, 0.4],
+            "metadata": {
+                "kind": "original",
+                "directories": ["docs"],
+                "hop_depth": "not-a-number",
+                "nested": {"a": [1, {"b": True}]},
+                "custom_null": None,
+                "custom_float": 3.14,
+            },
+        },
+        {
+            "document_id": 202,
+            "content": "metadata list payload",
+            "content_tokenized": "metadata list payload",
+            "vector": [0.0, 0.1, 0.0, 0.2],
+            "metadata": ["free", {"shape": "list"}],
+        },
+    ]
+    upsert = client.post(
+        f"/v2/collections/{cid}/documents:upsert",
+        json={"documents": docs, "mode": "overwrite", "expected_dim": 4},
+    )
+    assert upsert.status_code == 200, upsert.text
+    assert upsert.json()["written"] == 2
+
+    docs_resp = client.get(f"/v2/collections/{cid}/documents", params={"include_content": "true"})
+    assert docs_resp.status_code == 200, docs_resp.text
+    by_id = {d["document_id"]: d for d in docs_resp.json()["documents"]}
+    assert by_id[201]["metadata"] == docs[0]["metadata"]
+    assert by_id[202]["metadata"] == docs[1]["metadata"]
+
+    search_resp = client.post(
+        f"/v2/collections/{cid}/search",
+        json={
+            "query_tokenized": "metadata",
+            "query_vector": [0.2, 0.1, 0.3, 0.4],
+            "top_n": 5,
+            "top_m": 5,
+            "include_content": True,
+            "strategy": "legacy_hybrid",
+        },
+    )
+    assert search_resp.status_code == 200, search_resp.text
+    search_by_id = {d["document_id"]: d for d in search_resp.json()["hits"]}
+    assert search_by_id[201]["metadata"] == docs[0]["metadata"]
+
+
+def test_v2_metadata_flattened_columns_support_where_filter(client: TestClient):
+    cid = "generic_collection_metadata_filter"
+    docs = [
+        {
+            "document_id": 301,
+            "content": "document for acme",
+            "content_tokenized": "document for acme",
+            "vector": [0.1, 0.2, 0.3, 0.4],
+            "metadata": {"tenant": "acme", "risk": {"level": 2}, "active": True},
+        },
+        {
+            "document_id": 302,
+            "content": "document for beta",
+            "content_tokenized": "document for beta",
+            "vector": [0.4, 0.3, 0.2, 0.1],
+            "metadata": {"tenant": "beta", "risk": {"level": 1}, "active": False},
+        },
+    ]
+    upsert = client.post(
+        f"/v2/collections/{cid}/documents:upsert",
+        json={"documents": docs, "mode": "overwrite", "expected_dim": 4},
+    )
+    assert upsert.status_code == 200, upsert.text
+
+    meta = client.get(f"/v2/collections/{cid}/meta")
+    assert meta.status_code == 200, meta.text
+    filterable = meta.json()["filterable_fields"]
+
+    tenant_col = next((x for x in filterable if x.startswith("md_tenant_")), None)
+    level_col = next((x for x in filterable if x.startswith("md_risk__level_")), None)
+    active_col = next((x for x in filterable if x.startswith("md_active_")), None)
+    assert tenant_col is not None
+    assert level_col is not None
+    assert active_col is not None
+
+    docs_resp = client.get(
+        f"/v2/collections/{cid}/documents",
+        params={"include_content": "true", "where": f"{tenant_col} = 'acme' AND {level_col} = 2"},
+    )
+    assert docs_resp.status_code == 200, docs_resp.text
+    returned = docs_resp.json()["documents"]
+    assert {x["document_id"] for x in returned} == {301}
+
+    search_resp = client.post(
+        f"/v2/collections/{cid}/search",
+        json={
+            "query_tokenized": "document",
+            "query_vector": [0.1, 0.2, 0.3, 0.4],
+            "top_n": 5,
+            "top_m": 5,
+            "where": f"{active_col} = true",
+            "include_content": True,
+            "strategy": "legacy_hybrid",
+        },
+    )
+    assert search_resp.status_code == 200, search_resp.text
+    assert {x["document_id"] for x in search_resp.json()["hits"]} == {301}
+
+    append_resp = client.post(
+        f"/v2/collections/{cid}/documents:upsert",
+        json={
+            "documents": [
+                {
+                    "document_id": 303,
+                    "content": "document for acme region",
+                    "content_tokenized": "document for acme region",
+                    "vector": [0.2, 0.3, 0.4, 0.5],
+                    "metadata": {"tenant": "acme", "region": "cn"},
+                }
+            ],
+            "mode": "append",
+            "expected_dim": 4,
+        },
+    )
+    assert append_resp.status_code == 200, append_resp.text
+
+    meta_after_append = client.get(f"/v2/collections/{cid}/meta")
+    assert meta_after_append.status_code == 200, meta_after_append.text
+    filterable_after = meta_after_append.json()["filterable_fields"]
+    region_col = next((x for x in filterable_after if x.startswith("md_region_")), None)
+    assert region_col is not None
+
+    region_docs = client.get(
+        f"/v2/collections/{cid}/documents",
+        params={"include_content": "true", "where": f"{region_col} = 'cn'"},
+    )
+    assert region_docs.status_code == 200, region_docs.text
+    assert {x["document_id"] for x in region_docs.json()["documents"]} == {303}
+
+
+def test_v2_collection_overwrite_by_prefix(client: TestClient):
+    def _upsert(collection_id: str, document_id: int):
+        payload = {
+            "collection_id": collection_id,
+            "documents": [
+                {
+                    "document_id": document_id,
+                    "content": f"doc-{document_id}",
+                    "content_tokenized": f"doc {document_id}",
+                    "vector": [0.1, 0.2, 0.3, 0.4],
+                    "metadata": {"kind": "original"},
+                }
+            ],
+            "mode": "overwrite",
+            "expected_dim": 4,
+        }
+        resp = client.post("/v2/documents:upsert", json=payload)
+        assert resp.status_code == 200, resp.text
+
+    _upsert("invoice_202405", 1)
+    _upsert("invoice_202406", 2)
+    _upsert("notice_202406", 3)
+
+    overwrite_resp = client.post(
+        "/v2/collectionOverwriteByPrefix",
+        json={
+            "collection_id": "invoice_202407",
+            "documents": [
+                {
+                    "document_id": 4,
+                    "content": "latest invoice",
+                    "content_tokenized": "latest invoice",
+                    "vector": [0.9, 0.1, 0.2, 0.3],
+                    "metadata": {"kind": "original"},
+                }
+            ],
+            "expected_dim": 4,
+        },
+    )
+    assert overwrite_resp.status_code == 200, overwrite_resp.text
+    body = overwrite_resp.json()
+    assert body["written"] == 1
+    assert set(body["dropped_collections"]) == {"invoice_202405", "invoice_202406"}
+
+    lst = client.get("/v2/collections")
+    assert lst.status_code == 200, lst.text
+    remaining = {x["collection_id"] for x in lst.json()["collections"]}
+    assert "invoice_202407" in remaining
+    assert "invoice_202405" not in remaining
+    assert "invoice_202406" not in remaining
+    assert "notice_202406" in remaining
+
+
 def test_disable_relations_flag(monkeypatch):
     with _build_client(monkeypatch, ENABLE_LEGACY_RELATIONS=0) as c:
         resp = c.get(

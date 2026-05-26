@@ -12,7 +12,7 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 import pyarrow as pa
 from pydantic import BaseModel, Field, field_validator
@@ -27,7 +27,12 @@ _RELATION_KEY_TYPE = pa.struct([
 ])
 
 
-def build_arrow_schema(dim: int) -> pa.Schema:
+def build_arrow_schema(
+    dim: int,
+    *,
+    metadata_fields: dict[str, pa.DataType] | None = None,
+    include_metadata_json: bool = True,
+) -> pa.Schema:
     """根据 embedding 维度生成 pyarrow schema。
 
     ``dim <= 0`` 表示尚不知向量长度（创建空表保留位）；这种情况下 ``vector`` 列退化为
@@ -40,7 +45,7 @@ def build_arrow_schema(dim: int) -> pa.Schema:
     else:
         vec_type = pa.list_(pa.float32())
 
-    return pa.schema([
+    fields = [
         pa.field("chunk_id", pa.int64(), nullable=False),
         pa.field("content", pa.string(), nullable=False),
         pa.field("content_tokenized", pa.string(), nullable=False),
@@ -54,8 +59,15 @@ def build_arrow_schema(dim: int) -> pa.Schema:
         pa.field("hop_depth", pa.int32(), nullable=False),
         pa.field("source", pa.string(), nullable=False),
         pa.field("clause_id", pa.string(), nullable=False),
-        pa.field("built_at", pa.int64(), nullable=False),
-    ])
+    ]
+    if include_metadata_json:
+        fields.append(pa.field("metadata_json", pa.string()))
+    for col_name in sorted((metadata_fields or {}).keys()):
+        if not col_name.startswith("md_"):
+            continue
+        fields.append(pa.field(col_name, metadata_fields[col_name]))
+    fields.append(pa.field("built_at", pa.int64(), nullable=False))
+    return pa.schema(fields)
 
 
 # ---------------------------------------------------------------- pydantic models
@@ -82,6 +94,8 @@ class ChunkRow(BaseModel):
     hop_depth: int = 0
     source: str = ""
     clause_id: str = ""
+    metadata_json: str = "{}"
+    metadata_scalars: dict[str, Any] = Field(default_factory=dict)
     built_at: int = 0
 
     @field_validator("kind")
@@ -133,6 +147,7 @@ class SearchHit(BaseModel):
     hop_depth: int = 0
     source: str = ""
     clause_id: str = ""
+    metadata_json: str | None = None
 
 
 class SearchResponse(BaseModel):

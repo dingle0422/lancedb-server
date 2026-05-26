@@ -288,7 +288,7 @@ def list_policies() -> list[tuple[str, int, int]]:
 
 
 def _row_to_arrow_dict(row: ChunkRow) -> dict[str, Any]:
-    return {
+    base = {
         "chunk_id": int(row.chunk_id),
         "content": row.content or "",
         "content_tokenized": row.content_tokenized or "",
@@ -305,25 +305,158 @@ def _row_to_arrow_dict(row: ChunkRow) -> dict[str, Any]:
         "hop_depth": int(row.hop_depth),
         "source": row.source or "",
         "clause_id": row.clause_id or "",
+        "metadata_json": row.metadata_json or "{}",
         "built_at": int(row.built_at) or int(time.time() * 1000),
     }
+    for col, value in (row.metadata_scalars or {}).items():
+        if isinstance(col, str) and col.startswith("md_"):
+            base[col] = value
+    return base
 
 
-def _build_record_batch(rows: list[ChunkRow], dim: int) -> pa.RecordBatch:
-    schema = build_arrow_schema(dim)
-    arrow_dicts = [_row_to_arrow_dict(r) for r in rows]
-    # 强制每条 vector 长度一致到 dim
-    if dim > 0:
-        for d in arrow_dicts:
-            v = d["vector"]
-            if not v:
-                # 占位零向量，避免 fixed_size_list 长度校验失败
-                d["vector"] = [0.0] * dim
-            elif len(v) != dim:
-                raise ValueError(
-                    f"vector dim mismatch: chunk_id={d['chunk_id']} got={len(v)} expect={dim}"
-                )
-    return pa.RecordBatch.from_pylist(arrow_dicts, schema=schema)
+def _metadata_fields_from_schema(schema: pa.Schema) -> dict[str, pa.DataType]:
+    out: dict[str, pa.DataType] = {}
+    for field in schema:
+        if field.name.startswith("md_"):
+            out[field.name] = field.type
+    return out
+
+
+def _infer_metadata_dtype(values: list[Any]) -> pa.DataType:
+    non_null = [v for v in values if v is not None]
+    if not non_null:
+        return pa.string()
+    if all(isinstance(v, bool) for v in non_null):
+        return pa.bool_()
+    if all(isinstance(v, int) and not isinstance(v, bool) for v in non_null):
+        return pa.int64()
+    if all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in non_null):
+        return pa.float64()
+    if all(isinstance(v, str) for v in non_null):
+        return pa.string()
+    return pa.string()
+
+
+def _metadata_fields_from_rows(rows: list[ChunkRow]) -> dict[str, pa.DataType]:
+    samples: dict[str, list[Any]] = {}
+    for row in rows:
+        for col, value in (row.metadata_scalars or {}).items():
+            if not isinstance(col, str) or not col.startswith("md_"):
+                continue
+            samples.setdefault(col, []).append(value)
+    return {col: _infer_metadata_dtype(vals) for col, vals in samples.items()}
+
+
+def _merge_metadata_dtype(a: pa.DataType, b: pa.DataType) -> pa.DataType:
+    if a == b:
+        return a
+    if pa.types.is_string(a) or pa.types.is_string(b):
+        return pa.string()
+    if pa.types.is_floating(a) and pa.types.is_integer(b):
+        return a
+    if pa.types.is_integer(a) and pa.types.is_floating(b):
+        return b
+    if pa.types.is_integer(a) and pa.types.is_integer(b):
+        return pa.int64()
+    if pa.types.is_floating(a) and pa.types.is_floating(b):
+        return pa.float64()
+    return pa.string()
+
+
+def _coerce_metadata_value(value: Any, dtype: pa.DataType) -> Any:
+    if value is None:
+        return None
+    try:
+        if pa.types.is_string(dtype):
+            return str(value)
+        if pa.types.is_boolean(dtype):
+            if isinstance(value, bool):
+                return value
+            if isinstance(value, str):
+                lv = value.strip().lower()
+                if lv in ("true", "1", "yes", "y"):
+                    return True
+                if lv in ("false", "0", "no", "n"):
+                    return False
+                return None
+            if isinstance(value, (int, float)):
+                return bool(value)
+            return None
+        if pa.types.is_integer(dtype):
+            if isinstance(value, bool):
+                return int(value)
+            return int(value)
+        if pa.types.is_floating(dtype):
+            if isinstance(value, bool):
+                return float(int(value))
+            return float(value)
+    except Exception:
+        return None
+    return value
+
+
+def _normalize_row_for_schema(row: dict[str, Any], schema: pa.Schema, dim: int) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    for field in schema:
+        name = field.name
+        value = row.get(name)
+        if name == "vector":
+            vec = list(value or [])
+            if dim > 0:
+                if not vec:
+                    vec = [0.0] * dim
+                elif len(vec) != dim:
+                    raise ValueError(
+                        f"vector dim mismatch: chunk_id={row.get('chunk_id')} got={len(vec)} expect={dim}"
+                    )
+            out[name] = vec
+            continue
+        if name == "metadata_json":
+            out[name] = value if isinstance(value, str) else "{}"
+            continue
+        if name.startswith("md_"):
+            out[name] = _coerce_metadata_value(value, field.type)
+            continue
+        if value is not None:
+            out[name] = value
+            continue
+        if name == "chunk_id":
+            out[name] = int(row.get("chunk_id", 0))
+        elif name in ("content", "content_tokenized", "source", "clause_id"):
+            out[name] = str(row.get(name, "") or "")
+        elif name == "kind":
+            out[name] = str(row.get(name, "original") or "original")
+        elif name == "parent_chunk_index":
+            out[name] = int(row.get(name, -1) or -1)
+        elif name in ("derived_seq", "hop_depth"):
+            out[name] = int(row.get(name, 0) or 0)
+        elif name == "relation_keys":
+            out[name] = row.get(name) or []
+        elif name == "directories":
+            out[name] = row.get(name) or []
+        elif name == "heading_paths":
+            out[name] = row.get(name) or []
+        elif name == "built_at":
+            out[name] = int(row.get(name) or int(time.time() * 1000))
+        else:
+            out[name] = value
+    return out
+
+
+def _build_record_batch(
+    rows: list[ChunkRow],
+    dim: int,
+    *,
+    metadata_fields: dict[str, pa.DataType] | None = None,
+    include_metadata_json: bool = True,
+) -> pa.RecordBatch:
+    schema = build_arrow_schema(
+        dim,
+        metadata_fields=metadata_fields or _metadata_fields_from_rows(rows),
+        include_metadata_json=include_metadata_json,
+    )
+    normalized = [_normalize_row_for_schema(_row_to_arrow_dict(r), schema, dim) for r in rows]
+    return pa.RecordBatch.from_pylist(normalized, schema=schema)
 
 
 # ---------------------------------------------------------------- 索引
@@ -396,7 +529,20 @@ def ensure_indexes(tbl) -> dict[str, bool]:
 
     # 标量索引（可关）
     if settings.enable_scalar_index:
-        for col in ("kind", "parent_chunk_index"):
+        try:
+            schema: pa.Schema = tbl.schema
+            scalar_cols = ["kind", "parent_chunk_index"]
+            for field in schema:
+                if field.name.startswith("md_") and (
+                    pa.types.is_string(field.type)
+                    or pa.types.is_boolean(field.type)
+                    or pa.types.is_integer(field.type)
+                    or pa.types.is_floating(field.type)
+                ):
+                    scalar_cols.append(field.name)
+        except Exception:
+            scalar_cols = ["kind", "parent_chunk_index"]
+        for col in scalar_cols:
             try:
                 tbl.create_scalar_index(col, replace=True)
             except Exception as e:
@@ -418,6 +564,19 @@ def _infer_dim(rows: list[ChunkRow], expected: int | None) -> int:
     return 0
 
 
+def _all_rows(tbl) -> list[dict[str, Any]]:
+    n = int(tbl.count_rows())
+    if n <= 0:
+        return []
+    schema: pa.Schema = tbl.schema
+    return tbl.search().select(list(schema.names)).limit(n).to_list()
+
+
+def _build_batch_from_raw_rows(rows: list[dict[str, Any]], schema: pa.Schema, dim: int) -> pa.RecordBatch:
+    normalized = [_normalize_row_for_schema(row, schema, dim) for row in rows]
+    return pa.RecordBatch.from_pylist(normalized, schema=schema)
+
+
 def upsert(policy_id: str, rows: list[ChunkRow], mode: str, expected_dim: int | None) -> dict:
     """单表 upsert。返回 ``{"written", "table_size", "dim"}``。"""
 
@@ -428,6 +587,8 @@ def upsert(policy_id: str, rows: list[ChunkRow], mode: str, expected_dim: int | 
     with write_lock:
         db = _connect()
         name = _safe_policy_dir(policy_id)
+        table_names = _all_table_names(db)
+        table_existed = name in table_names
 
         incoming_dim = _infer_dim(rows, expected_dim)
         existing_dim = _existing_dim(policy_id)
@@ -436,9 +597,50 @@ def upsert(policy_id: str, rows: list[ChunkRow], mode: str, expected_dim: int | 
                 f"dim mismatch for policy={policy_id}: existing={existing_dim} incoming={incoming_dim}"
             )
         dim = incoming_dim or existing_dim
-        batch = _build_record_batch(rows, dim)
 
-        if mode == "overwrite" or name not in _all_table_names(db):
+        incoming_md_fields = _metadata_fields_from_rows(rows)
+        existing_md_fields: dict[str, pa.DataType] = {}
+        include_metadata_json = True
+        existing_schema: pa.Schema | None = None
+        if table_existed:
+            with _table_lock:
+                tbl_cached = _table_cache.get(policy_id)
+            tbl_for_schema = tbl_cached
+            if tbl_for_schema is None:
+                tbl_for_schema = db.open_table(name)
+            existing_schema = tbl_for_schema.schema
+            existing_md_fields = _metadata_fields_from_schema(existing_schema)
+            include_metadata_json = "metadata_json" in existing_schema.names
+
+        merged_md_fields: dict[str, pa.DataType] = dict(existing_md_fields)
+        for col, dtype in incoming_md_fields.items():
+            if col in merged_md_fields:
+                merged_md_fields[col] = _merge_metadata_dtype(merged_md_fields[col], dtype)
+            else:
+                merged_md_fields[col] = dtype
+
+        # overwrite / 新建时直接用 merged schema；append/merge 若 schema 变化则走全量重写
+        schema_changed = False
+        if table_existed and mode in ("append", "merge_by_chunk_id") and existing_schema is not None:
+            if not include_metadata_json:
+                schema_changed = True
+            elif set(merged_md_fields.keys()) != set(existing_md_fields.keys()):
+                schema_changed = True
+            else:
+                for col, old_dtype in existing_md_fields.items():
+                    if merged_md_fields.get(col) != old_dtype:
+                        schema_changed = True
+                        break
+
+        incoming_dict_rows = [_row_to_arrow_dict(r) for r in rows]
+
+        if mode == "overwrite" or not table_existed:
+            batch = _build_record_batch(
+                rows,
+                dim,
+                metadata_fields=merged_md_fields,
+                include_metadata_json=True,
+            )
             tbl = _overwrite_or_create(db, policy_id, name, batch, dim, existing_dim)
         else:
             # 始终复用缓存句柄，避免产生多个持有同一文件的 Table 对象
@@ -446,24 +648,56 @@ def upsert(policy_id: str, rows: list[ChunkRow], mode: str, expected_dim: int | 
                 tbl = _table_cache.get(policy_id)
             if tbl is None:
                 tbl = db.open_table(name)
-            if mode == "append":
-                tbl.add(batch)
-            elif mode == "merge_by_chunk_id":
-                try:
-                    (
-                        tbl.merge_insert("chunk_id")
-                        .when_matched_update_all()
-                        .when_not_matched_insert_all()
-                        .execute(batch)
-                    )
-                except Exception as e:
-                    # LanceDB 老版本可能不支持 merge_insert，退化为 delete + add
-                    logger.info("[Store] merge_insert 不可用，退化为 delete+add: %s", e)
-                    ids = [str(r.chunk_id) for r in rows]
-                    tbl.delete(f"chunk_id IN ({','.join(ids)})")
-                    tbl.add(batch)
-            else:
+            if mode not in ("append", "merge_by_chunk_id"):
                 raise ValueError(f"unknown upsert mode: {mode}")
+
+            if schema_changed:
+                target_schema = build_arrow_schema(
+                    dim,
+                    metadata_fields=merged_md_fields,
+                    include_metadata_json=True,
+                )
+                existing_rows = _all_rows(tbl)
+                normalized_incoming = [
+                    _normalize_row_for_schema(r, target_schema, dim) for r in incoming_dict_rows
+                ]
+                if mode == "append":
+                    merged_rows = [
+                        _normalize_row_for_schema(r, target_schema, dim) for r in existing_rows
+                    ] + normalized_incoming
+                else:
+                    by_id: dict[int, dict[str, Any]] = {
+                        int(r.get("chunk_id", 0)): _normalize_row_for_schema(r, target_schema, dim)
+                        for r in existing_rows
+                    }
+                    for row in normalized_incoming:
+                        by_id[int(row.get("chunk_id", 0))] = row
+                    merged_rows = list(by_id.values())
+                batch = _build_batch_from_raw_rows(merged_rows, target_schema, dim)
+                tbl = _overwrite_or_create(db, policy_id, name, batch, dim, existing_dim)
+            else:
+                batch = _build_record_batch(
+                    rows,
+                    dim,
+                    metadata_fields=existing_md_fields,
+                    include_metadata_json=include_metadata_json,
+                )
+                if mode == "append":
+                    tbl.add(batch)
+                else:
+                    try:
+                        (
+                            tbl.merge_insert("chunk_id")
+                            .when_matched_update_all()
+                            .when_not_matched_insert_all()
+                            .execute(batch)
+                        )
+                    except Exception as e:
+                        # LanceDB 老版本可能不支持 merge_insert，退化为 delete + add
+                        logger.info("[Store] merge_insert 不可用，退化为 delete+add: %s", e)
+                        ids = [str(r.chunk_id) for r in rows]
+                        tbl.delete(f"chunk_id IN ({','.join(ids)})")
+                        tbl.add(batch)
 
         with _table_lock:
             _table_cache[policy_id] = tbl
@@ -526,10 +760,19 @@ def _row_to_hit(row: dict, *, include_content: bool) -> SearchHit:
         hop_depth=int(row.get("hop_depth", 0)),
         source=row.get("source") or "",
         clause_id=row.get("clause_id") or "",
+        metadata_json=row.get("metadata_json"),
     )
 
 
-def _select_columns(include_content: bool) -> list[str]:
+def _table_columns(tbl) -> set[str]:
+    try:
+        schema: pa.Schema = tbl.schema
+        return set(schema.names)
+    except Exception:
+        return set()
+
+
+def _select_columns(include_content: bool, *, available_columns: set[str] | None = None) -> list[str]:
     cols = [
         "chunk_id",
         "heading_paths",
@@ -544,6 +787,8 @@ def _select_columns(include_content: bool) -> list[str]:
     ]
     if include_content:
         cols.append("content")
+    if available_columns is None or "metadata_json" in available_columns:
+        cols.append("metadata_json")
     return cols
 
 
@@ -585,7 +830,7 @@ def hybrid_search(
     if n_total == 0:
         return []
 
-    cols = _select_columns(include_content)
+    cols = _select_columns(include_content, available_columns=_table_columns(tbl))
     final_where = where
     if not include_derived:
         cond = "kind = 'original'"
@@ -653,7 +898,7 @@ def list_chunks(
     if not table_exists(policy_id):
         return []
     tbl = open_table(policy_id)
-    cols = _select_columns(include_content)
+    cols = _select_columns(include_content, available_columns=_table_columns(tbl))
     q = tbl.search().select(cols)
     if where:
         q = q.where(where)
@@ -667,7 +912,7 @@ def expand_relations(policy_id: str, chunk_id: int, *, include_content: bool) ->
     if not table_exists(policy_id):
         return []
     tbl = open_table(policy_id)
-    cols = _select_columns(include_content)
+    cols = _select_columns(include_content, available_columns=_table_columns(tbl))
     rows = (
         tbl.search()
         .select(cols)
@@ -690,7 +935,7 @@ def lookup_relations(
     if not table_exists(policy_id):
         return []
     tbl = open_table(policy_id)
-    cols = _select_columns(include_content)
+    cols = _select_columns(include_content, available_columns=_table_columns(tbl))
     # 用 list_has_struct 的能力：LanceDB SQL 支持 ``array_has(relation_keys, struct_value)``，
     # 但跨版本不稳定。回退到 Python 侧过滤，性能可接受（派生 chunks 一般 < 1k）。
     rows = (

@@ -45,14 +45,14 @@ class GenericDocumentInput(BaseModel):
     content: str
     content_tokenized: str = ""
     vector: list[float] = Field(default_factory=list)
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    metadata: Any = Field(default_factory=dict)
 
 
 class GenericDocumentRecord(BaseModel):
     document_id: int
     score: float = 0.0
     content: str | None = None
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    metadata: Any = Field(default_factory=dict)
 
 
 class DocumentListResponse(BaseModel):
@@ -93,6 +93,16 @@ class SearchResponseV2(BaseModel):
 
 class DocumentUpsertRequestWithCollection(DocumentUpsertRequest):
     collection_id: str
+
+
+class CollectionOverwriteByPrefixRequest(BaseModel):
+    collection_id: str
+    documents: list[GenericDocumentInput] = Field(..., min_length=1)
+    expected_dim: int | None = None
+
+
+class CollectionOverwriteByPrefixResponse(DocumentUpsertResponse):
+    dropped_collections: list[str] = Field(default_factory=list)
 
 
 class CapabilitiesResponse(BaseModel):

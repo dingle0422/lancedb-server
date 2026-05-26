@@ -81,7 +81,8 @@
 - `documents` 在 upsert 请求中最少 1 条（空数组会被 422 拒绝）
 - `content_tokenized` 允许空；为空时服务端会回退为简单分词
 - `vector` 可为空（纯 BM25）；有值时应保证同一集合维度一致
-- `metadata` 当前仅解析固定字段，其余字段会被忽略
+- `metadata` 支持任意 JSON 结构（对象/数组/基础类型），写入后在读取与检索结果中原样返回
+- `metadata` 中可扁平化为标量的叶子字段会自动落成独立列（列名前缀 `md_`），并自动尝试构建标量索引，用于 `where` 过滤
 
 读取/检索返回模型（`GenericDocumentRecord`）：
 
@@ -104,6 +105,15 @@
 }
 ```
 
+说明：上面的 `metadata` 字段仅为示例，不代表固定字段集合；调用方可以按业务需要扩展任意字段与嵌套结构。
+
+扁平化列规则（用于 `where`）：
+
+- 列名格式：`md_<path_sanitized>_<hash8>`
+- 路径分隔：对象层级用 `__`，数组索引用数字路径
+- 示例路径：`metadata.tenant` -> `md_tenant_xxxxxxxx`，`metadata.risk.level` -> `md_risk__level_xxxxxxxx`
+- 实际可用列名以 `/v2/collections/{collection_id}/meta` 的 `filterable_fields` 为准
+
 ## 4. 接口总览
 
 
@@ -113,6 +123,7 @@
 | GET    | `/v2/collections`                                  | 列出集合                             |
 | GET    | `/v2/collections/{collection_id}/meta`             | 查询集合元信息                          |
 | DELETE | `/v2/collections/{collection_id}`                  | 删除集合                             |
+| POST   | `/v2/collectionOverwriteByPrefix`                  | 按前缀覆盖写入（清理同前缀旧集合）               |
 | GET    | `/v2/collections/{collection_id}/documents`        | 列表文档                             |
 | GET    | `/v2/documents`                                    | 列表文档（别名，query 带 `collection_id`） |
 | POST   | `/v2/collections/{collection_id}/documents:upsert` | 写入文档                             |
@@ -161,7 +172,7 @@
   "built_at": 1716620000000,
   "schema_version": 1,
   "schema_fields": [],
-  "filterable_fields": ["kind", "parent_chunk_index"],
+  "filterable_fields": ["kind", "parent_chunk_index", "md_tenant_a1b2c3d4", "md_risk__level_e5f6a7b8"],
   "searchable_fields": ["content_tokenized", "content", "vector"]
 }
 ```
@@ -188,7 +199,7 @@
 
 Query 参数：
 
-- `where`：过滤表达式（LanceDB where 语法）
+- `where`：过滤表达式（LanceDB where 语法）；可使用基础字段（如 `kind`）和扁平化后的 `md_*` 字段
 - `limit`：默认 `1000`，范围 `1..100000`
 - `include_content`：默认 `false`
 
@@ -273,7 +284,52 @@ Query 参数：
 - `400`：维度不一致、未知 upsert 模式等业务参数错误
 - `422`：请求体字段校验失败（例如 `documents` 为空）
 
-### 5.6 混合检索
+### 5.6 按前缀覆盖写入（collectionOverwriteByPrefix）
+
+`POST /v2/collectionOverwriteByPrefix`
+
+行为说明：
+
+- 先取 `collection_id.split("_")[0]` 作为前缀
+- 删除当前库中所有“前缀相同且 `collection_id` 不同”的集合
+- 再用 `overwrite` 模式写入当前 `collection_id`（与创建新 collection 的写入链路一致）
+
+请求体：
+
+```json
+{
+  "collection_id": "invoice_202407",
+  "documents": [
+    {
+      "document_id": 1,
+      "content": "latest invoice",
+      "content_tokenized": "latest invoice",
+      "vector": [0.1, 0.2, 0.3, 0.4],
+      "metadata": {"kind": "original"}
+    }
+  ],
+  "expected_dim": 4
+}
+```
+
+成功响应：
+
+```json
+{
+  "written": 1,
+  "table_size": 1,
+  "dim": 4,
+  "dropped_collections": ["invoice_202405", "invoice_202406"]
+}
+```
+
+常见失败：
+
+- `400`：维度不一致等业务参数错误
+- `422`：请求体字段校验失败（例如 `documents` 为空）
+- `500`：删除或写入阶段服务内部错误
+
+### 5.7 混合检索
 
 `POST /v2/collections/{collection_id}/search`
 
@@ -301,6 +357,7 @@ Query 参数：
 - `top_m`：BM25 召回上限
 - `rrf_k`：RRF 常数；不传时使用服务端配置值
 - `include_derived=false`：会在 where 上附加 `kind='original'`
+- 需要按 metadata 过滤时，建议先调用 `GET /v2/collections/{collection_id}/meta` 获取最新 `filterable_fields` 中的 `md_*` 列名
 - `strategy`：当前仅支持 `legacy_hybrid`
 
 别名接口：

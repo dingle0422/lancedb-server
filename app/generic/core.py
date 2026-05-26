@@ -20,6 +20,10 @@ from .adapters import (
 )
 
 
+def _collection_prefix(collection_id: str) -> str:
+    return collection_id.split("_")[0]
+
+
 class CollectionStore:
     """集合生命周期与元数据查询。"""
 
@@ -32,6 +36,18 @@ class CollectionStore:
 
     def drop_collection(self, collection_id: str) -> bool:
         return store.drop_table(collection_to_policy(collection_id))
+
+    def drop_collections_with_same_prefix(self, collection_id: str) -> list[str]:
+        prefix = _collection_prefix(collection_id)
+        dropped: list[str] = []
+        for cid, _, _ in self.list_collections():
+            if cid == collection_id:
+                continue
+            if _collection_prefix(cid) != prefix:
+                continue
+            if self.drop_collection(cid):
+                dropped.append(cid)
+        return dropped
 
     def collection_meta(self, collection_id: str) -> dict:
         policy_id = collection_to_policy(collection_id)
@@ -48,7 +64,12 @@ class CollectionStore:
             schema_fields = [field_to_schema_field(f).model_dump() for f in schema]
             for f in schema:
                 t = f.type
-                if pa.types.is_string(t) or pa.types.is_integer(t) or pa.types.is_boolean(t):
+                if (
+                    pa.types.is_string(t)
+                    or pa.types.is_integer(t)
+                    or pa.types.is_floating(t)
+                    or pa.types.is_boolean(t)
+                ):
                     filterable_fields.append(f.name)
             searchable_fields = [name for name in ("content_tokenized", "content", "vector") if name in schema.names]
         except Exception:
