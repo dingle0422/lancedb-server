@@ -69,12 +69,12 @@ http://127.0.0.1:5000/gradio-generic/   # 通用 collection/document 界面（v2
   - 左侧 dataset（policy）列表，显示行数 / 向量维度
   - **Schema** tab：表 meta（行数、维度、索引状态）+ 完整 pyarrow schema
   - **Browse** tab：where 过滤 + 分页 + 列选择，**vector 列以 unicode sparkline 紧凑展示**（如 `[768d] ▃▅▂▇▆▄▁█…`），免去看一长串浮点数
-- **Hybrid Search** tab：**直接输查询原文**，UI 内部自动用 jieba 分词（复用 `retrieval/bm25.py::tokenize`，与建索引时同源），并调用 OpenAI 兼容 `/embeddings` 接口取 query 向量。默认不启用 embedding，避免绑定内网环境；配置后即可启用：
+- **Hybrid Search** tab：**直接输查询原文**，UI 内部自动用 jieba 分词（复用 `retrieval/bm25.py::tokenize`，与建索引时同源），并调用 OpenAI 兼容 `/embeddings` 接口取 query 向量。默认已写死内网 qwen3-embedding，启动后直接可用；想换服务再用环境变量覆盖：
 
     | 环境变量 | 默认值 | 说明 |
     |---|---|---|
-    | `EMBEDDING_BASE_URL` | 空 | 例如 `https://api.openai.com/v1` |
-    | `EMBEDDING_MODEL` | 空 | 必须与索引时向量维度一致 |
+    | `EMBEDDING_BASE_URL` | `http://mlp.paas.dc.servyou-it.com/qwen3-embedding/v1` | 代码里硬编码；显式置空则降级 BM25-only |
+    | `EMBEDDING_MODEL` | `qwen3-embedding` | 必须与索引时向量维度一致 |
     | `EMBEDDING_API_KEY` | 空 | 可选 |
 
     上述环境变量可以直接在 shell 里 `export` / `$env:` 设置，也可以写到仓库根目录的 `.env` 文件（参考 `.env.example`）。服务启动时 `app/main.py` 会 `load_dotenv()` 把 `.env` 注入 `os.environ`，所以 Gradio 与裸 `uvicorn app.main:app` 两种启动方式都生效。

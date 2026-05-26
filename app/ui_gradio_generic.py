@@ -23,8 +23,8 @@ _TOKEN_SPLIT_RE = re.compile(r"[\s\W_]+")
 _BARS = "▁▂▃▄▅▆▇█"
 _PREVIEW_MAX = 64
 
-_DEFAULT_EMBEDDING_BASE_URL = ""
-_DEFAULT_EMBEDDING_MODEL = ""
+_DEFAULT_EMBEDDING_BASE_URL = "http://mlp.paas.dc.servyou-it.com/qwen3-embedding/v1"
+_DEFAULT_EMBEDDING_MODEL = "qwen3-embedding"
 
 
 def _tokenize_query(text: str) -> str:

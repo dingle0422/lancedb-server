@@ -201,18 +201,18 @@ def _tokenize_query(text: str) -> str:
     return " ".join(t for t in re.split(r"[\s\W_]+", text.lower()) if t)
 
 
-_DEFAULT_EMBEDDING_BASE_URL = ""
-_DEFAULT_EMBEDDING_MODEL = ""
+_DEFAULT_EMBEDDING_BASE_URL = "http://mlp.paas.dc.servyou-it.com/qwen3-embedding/v1"
+_DEFAULT_EMBEDDING_MODEL = "qwen3-embedding"
 
 
 def _embed_query(text: str) -> tuple[list[float], str]:
     """OpenAI 兼容 embedding（`{EMBEDDING_BASE_URL}/embeddings`）。
 
-    默认不启用 embedding，避免耦合特定内网环境；可通过环境变量显式配置：
+    默认指向内网 qwen3-embedding；可通过环境变量覆盖：
         EMBEDDING_BASE_URL
         EMBEDDING_MODEL
         EMBEDDING_API_KEY   可空
-    任何一项显式设为空字符串都视作"未配置"，自动降级 BM25-only。
+    任一显式设为空字符串才视作"未配置"，触发 BM25-only 降级。
     """
 
     if not text or not text.strip():
