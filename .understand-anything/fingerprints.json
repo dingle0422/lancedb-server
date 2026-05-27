@@ -1,0 +1,3683 @@
+{
+  "version": "1.0.0",
+  "gitCommitHash": "ba57eea3845d50bcf6d44d7a2e5ab88523b03623",
+  "generatedAt": "2026-05-27T07:20:43.398Z",
+  "files": {
+    ".env.example": {
+      "filePath": ".env.example",
+      "contentHash": "8ceedce29aa11ab0e8482da5fc9eeeaaaf977a5b3d8eb957e0c923e2aed0d2fe",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 22,
+      "hasStructuralAnalysis": true
+    },
+    ".understand-anything/.understandignore": {
+      "filePath": ".understand-anything/.understandignore",
+      "contentHash": "04ceccfcb645502e6ca09b1774e3d72d601fcecaa458fa4974b24424129c855b",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 36,
+      "hasStructuralAnalysis": false
+    },
+    "app/__init__.py": {
+      "filePath": "app/__init__.py",
+      "contentHash": "e3ffa13945cfa07cac12f55418a28ef1d1e482b35b7e0027326df241e774a305",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 4,
+      "hasStructuralAnalysis": true
+    },
+    "app/config.py": {
+      "filePath": "app/config.py",
+      "contentHash": "8534079bab7c54b7fce8d75480dcc491ffc23cd5b2090e4d0e90bc262bc0af76",
+      "functions": [
+        {
+          "name": "get_settings",
+          "params": [],
+          "returnType": "Settings",
+          "exported": true,
+          "lineCount": 2
+        }
+      ],
+      "classes": [
+        {
+          "name": "Settings",
+          "methods": [],
+          "properties": [
+            "store_dir",
+            "api_key",
+            "host",
+            "port",
+            "log_level",
+            "enable_scalar_index",
+            "rrf_k",
+            "enable_generic_api",
+            "enable_legacy_relations",
+            "enable_legacy_ui",
+            "enable_generic_gradio",
+            "gradio_use_http",
+            "gradio_api_base_url",
+            "gradio_api_key",
+            "enable_server_embedding_fallback",
+            "embedding_base_url",
+            "embedding_model",
+            "embedding_api_key",
+            "embedding_timeout_sec"
+          ],
+          "exported": true,
+          "lineCount": 38
+        }
+      ],
+      "imports": [
+        {
+          "source": "functools",
+          "specifiers": [
+            "lru_cache"
+          ]
+        },
+        {
+          "source": "pydantic_settings",
+          "specifiers": [
+            "BaseSettings",
+            "SettingsConfigDict"
+          ]
+        }
+      ],
+      "exports": [
+        "Settings",
+        "get_settings"
+      ],
+      "totalLines": 53,
+      "hasStructuralAnalysis": true
+    },
+    "app/deps.py": {
+      "filePath": "app/deps.py",
+      "contentHash": "a24ef7ed7f84e1cece4b403c21a300125f8d7d81d2295ec5c57af55079f29b7d",
+      "functions": [
+        {
+          "name": "require_api_key",
+          "params": [
+            "x_api_key",
+            "authorization"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 19
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "fastapi",
+          "specifiers": [
+            "Header",
+            "HTTPException",
+            "status"
+          ]
+        },
+        {
+          "source": ".config",
+          "specifiers": [
+            "get_settings"
+          ]
+        }
+      ],
+      "exports": [
+        "require_api_key"
+      ],
+      "totalLines": 29,
+      "hasStructuralAnalysis": true
+    },
+    "app/embedding_fallback.py": {
+      "filePath": "app/embedding_fallback.py",
+      "contentHash": "92a5ffc08042f0d117ddc5f49cce4e396359ce7da658ac3045c54d13776d7684",
+      "functions": [
+        {
+          "name": "_parse_embeddings",
+          "params": [
+            "payload",
+            "expected_size"
+          ],
+          "returnType": "list[list[float]]",
+          "exported": true,
+          "lineCount": 22
+        },
+        {
+          "name": "embed_texts",
+          "params": [
+            "texts"
+          ],
+          "returnType": "tuple[list[list[float]], str]",
+          "exported": true,
+          "lineCount": 37
+        },
+        {
+          "name": "embed_query",
+          "params": [
+            "text"
+          ],
+          "returnType": "tuple[list[float], str]",
+          "exported": true,
+          "lineCount": 7
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "json",
+          "specifiers": [
+            "json"
+          ]
+        },
+        {
+          "source": "typing",
+          "specifiers": [
+            "Any"
+          ]
+        },
+        {
+          "source": "urllib.error",
+          "specifiers": [
+            "HTTPError",
+            "URLError"
+          ]
+        },
+        {
+          "source": "urllib.request",
+          "specifiers": [
+            "Request",
+            "urlopen"
+          ]
+        },
+        {
+          "source": ".config",
+          "specifiers": [
+            "get_settings"
+          ]
+        }
+      ],
+      "exports": [
+        "_parse_embeddings",
+        "embed_texts",
+        "embed_query"
+      ],
+      "totalLines": 83,
+      "hasStructuralAnalysis": true
+    },
+    "app/generic/__init__.py": {
+      "filePath": "app/generic/__init__.py",
+      "contentHash": "80547a97ac93f2218a3d2ea7cb86069f2065b672c1a84182ecc6413698e658a5",
+      "functions": [],
+      "classes": [],
+      "imports": [
+        {
+          "source": ".core",
+          "specifiers": [
+            "GenericVectorService",
+            "get_vector_service"
+          ]
+        }
+      ],
+      "exports": [],
+      "totalLines": 6,
+      "hasStructuralAnalysis": true
+    },
+    "app/generic/adapters.py": {
+      "filePath": "app/generic/adapters.py",
+      "contentHash": "926046db2979fa03da2a1392f9aa37e5578f25d6a5cfa370cb6f7cf5795f76c4",
+      "functions": [
+        {
+          "name": "policy_to_collection",
+          "params": [
+            "policy_id"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "collection_to_policy",
+          "params": [
+            "collection_id"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "_fallback_tokenize",
+          "params": [
+            "text"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "_normalize_heading_paths",
+          "params": [
+            "value"
+          ],
+          "returnType": "list[list[str]]",
+          "exported": true,
+          "lineCount": 8
+        },
+        {
+          "name": "_normalize_str_list",
+          "params": [
+            "value"
+          ],
+          "returnType": "list[str]",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "_normalize_relation_keys",
+          "params": [
+            "value"
+          ],
+          "returnType": "list[RelationKey]",
+          "exported": true,
+          "lineCount": 13
+        },
+        {
+          "name": "_to_int",
+          "params": [
+            "value",
+            "default"
+          ],
+          "returnType": "int",
+          "exported": true,
+          "lineCount": 7
+        },
+        {
+          "name": "_normalize_kind",
+          "params": [
+            "value"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "_serialize_metadata",
+          "params": [
+            "value"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 5
+        },
+        {
+          "name": "_sanitize_metadata_segment",
+          "params": [
+            "seg"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "_metadata_path_to_column",
+          "params": [
+            "path"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 5
+        },
+        {
+          "name": "_flatten_metadata_leaves",
+          "params": [
+            "value",
+            "path"
+          ],
+          "returnType": "dict[tuple[str, ...], Any]",
+          "exported": true,
+          "lineCount": 14
+        },
+        {
+          "name": "_extract_metadata_scalars",
+          "params": [
+            "value"
+          ],
+          "returnType": "dict[str, Any]",
+          "exported": true,
+          "lineCount": 12
+        },
+        {
+          "name": "document_to_chunk_row",
+          "params": [
+            "doc"
+          ],
+          "returnType": "ChunkRow",
+          "exported": true,
+          "lineCount": 26
+        },
+        {
+          "name": "hit_to_generic_document",
+          "params": [
+            "hit"
+          ],
+          "returnType": "GenericDocumentRecord",
+          "exported": true,
+          "lineCount": 25
+        },
+        {
+          "name": "field_to_schema_field",
+          "params": [
+            "field"
+          ],
+          "returnType": "SchemaField",
+          "exported": true,
+          "lineCount": 6
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "hashlib",
+          "specifiers": [
+            "hashlib"
+          ]
+        },
+        {
+          "source": "json",
+          "specifiers": [
+            "json"
+          ]
+        },
+        {
+          "source": "re",
+          "specifiers": [
+            "re"
+          ]
+        },
+        {
+          "source": "time",
+          "specifiers": [
+            "time"
+          ]
+        },
+        {
+          "source": "typing",
+          "specifiers": [
+            "Any"
+          ]
+        },
+        {
+          "source": "..schema",
+          "specifiers": [
+            "ChunkRow",
+            "RelationKey",
+            "SearchHit"
+          ]
+        },
+        {
+          "source": "..schema_generic",
+          "specifiers": [
+            "GenericDocumentInput",
+            "GenericDocumentRecord",
+            "SchemaField"
+          ]
+        }
+      ],
+      "exports": [
+        "policy_to_collection",
+        "collection_to_policy",
+        "_fallback_tokenize",
+        "_normalize_heading_paths",
+        "_normalize_str_list",
+        "_normalize_relation_keys",
+        "_to_int",
+        "_normalize_kind",
+        "_serialize_metadata",
+        "_sanitize_metadata_segment",
+        "_metadata_path_to_column",
+        "_flatten_metadata_leaves",
+        "_extract_metadata_scalars",
+        "document_to_chunk_row",
+        "hit_to_generic_document",
+        "field_to_schema_field"
+      ],
+      "totalLines": 193,
+      "hasStructuralAnalysis": true
+    },
+    "app/generic/core.py": {
+      "filePath": "app/generic/core.py",
+      "contentHash": "2c0c873e0a97945e6aa434b9424fcc59b210bf1734ab94035930e013d5c7b8cd",
+      "functions": [
+        {
+          "name": "_collection_prefix",
+          "params": [
+            "collection_id"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 2
+        },
+        {
+          "name": "get_vector_service",
+          "params": [],
+          "returnType": "GenericVectorService",
+          "exported": true,
+          "lineCount": 2
+        }
+      ],
+      "classes": [
+        {
+          "name": "CollectionStore",
+          "methods": [
+            "list_collections",
+            "collection_exists",
+            "drop_collection",
+            "drop_collections_with_same_prefix",
+            "collection_meta"
+          ],
+          "properties": [],
+          "exported": true,
+          "lineCount": 68
+        },
+        {
+          "name": "DocumentStore",
+          "methods": [
+            "upsert_legacy",
+            "upsert_documents",
+            "list_legacy",
+            "list_documents"
+          ],
+          "properties": [],
+          "exported": true,
+          "lineCount": 48
+        },
+        {
+          "name": "RetrievalEngine",
+          "methods": [
+            "search_legacy",
+            "search_documents"
+          ],
+          "properties": [],
+          "exported": true,
+          "lineCount": 59
+        },
+        {
+          "name": "GenericVectorService",
+          "methods": [
+            "__init__",
+            "capabilities"
+          ],
+          "properties": [],
+          "exported": true,
+          "lineCount": 25
+        }
+      ],
+      "imports": [
+        {
+          "source": "functools",
+          "specifiers": [
+            "lru_cache"
+          ]
+        },
+        {
+          "source": "pyarrow",
+          "specifiers": [
+            "pa"
+          ]
+        },
+        {
+          "source": "..",
+          "specifiers": [
+            "store"
+          ]
+        },
+        {
+          "source": "..config",
+          "specifiers": [
+            "get_settings"
+          ]
+        },
+        {
+          "source": "..schema",
+          "specifiers": [
+            "ChunkRow",
+            "SearchHit"
+          ]
+        },
+        {
+          "source": "..schema_generic",
+          "specifiers": [
+            "GenericDocumentInput",
+            "GenericDocumentRecord"
+          ]
+        },
+        {
+          "source": ".adapters",
+          "specifiers": [
+            "collection_to_policy",
+            "document_to_chunk_row",
+            "field_to_schema_field",
+            "hit_to_generic_document",
+            "policy_to_collection"
+          ]
+        }
+      ],
+      "exports": [
+        "_collection_prefix",
+        "CollectionStore",
+        "DocumentStore",
+        "RetrievalEngine",
+        "GenericVectorService",
+        "get_vector_service"
+      ],
+      "totalLines": 238,
+      "hasStructuralAnalysis": true
+    },
+    "app/main.py": {
+      "filePath": "app/main.py",
+      "contentHash": "df269c16fc8110ed9fbeda9d2d66152063e0ab8ee4f7943b5c067f2e17d28e6e",
+      "functions": [
+        {
+          "name": "_configure_logging",
+          "params": [
+            "level"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 5
+        },
+        {
+          "name": "lifespan",
+          "params": [
+            "app"
+          ],
+          "exported": true,
+          "lineCount": 12
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "logging",
+          "specifiers": [
+            "logging"
+          ]
+        },
+        {
+          "source": "contextlib",
+          "specifiers": [
+            "asynccontextmanager"
+          ]
+        },
+        {
+          "source": "pathlib",
+          "specifiers": [
+            "Path"
+          ]
+        },
+        {
+          "source": "dotenv",
+          "specifiers": [
+            "load_dotenv"
+          ]
+        },
+        {
+          "source": "fastapi",
+          "specifiers": [
+            "FastAPI"
+          ]
+        },
+        {
+          "source": "fastapi.middleware.cors",
+          "specifiers": [
+            "CORSMiddleware"
+          ]
+        },
+        {
+          "source": ".",
+          "specifiers": [
+            "__version__"
+          ]
+        },
+        {
+          "source": ".config",
+          "specifiers": [
+            "get_settings"
+          ]
+        },
+        {
+          "source": ".routers",
+          "specifiers": [
+            "chunks",
+            "health",
+            "meta",
+            "relations",
+            "search",
+            "v2"
+          ]
+        }
+      ],
+      "exports": [
+        "_configure_logging",
+        "lifespan"
+      ],
+      "totalLines": 98,
+      "hasStructuralAnalysis": true
+    },
+    "app/routers/__init__.py": {
+      "filePath": "app/routers/__init__.py",
+      "contentHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 1,
+      "hasStructuralAnalysis": true
+    },
+    "app/routers/chunks.py": {
+      "filePath": "app/routers/chunks.py",
+      "contentHash": "d72b5c33ff2ab7bb5e486f1f4f0fa6fd49501cf8c0f5a31be8ba2d3ee90067d6",
+      "functions": [
+        {
+          "name": "upsert_chunks",
+          "params": [
+            "policy_id",
+            "body"
+          ],
+          "returnType": "UpsertResponse",
+          "exported": true,
+          "lineCount": 16
+        },
+        {
+          "name": "list_chunks",
+          "params": [
+            "policy_id",
+            "where",
+            "limit",
+            "include_content"
+          ],
+          "returnType": "list[SearchHit]",
+          "exported": true,
+          "lineCount": 22
+        },
+        {
+          "name": "drop_policy",
+          "params": [
+            "policy_id"
+          ],
+          "returnType": "dict",
+          "exported": true,
+          "lineCount": 4
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "logging",
+          "specifiers": [
+            "logging"
+          ]
+        },
+        {
+          "source": "functools",
+          "specifiers": [
+            "partial"
+          ]
+        },
+        {
+          "source": "anyio",
+          "specifiers": [
+            "anyio"
+          ]
+        },
+        {
+          "source": "fastapi",
+          "specifiers": [
+            "APIRouter",
+            "Depends",
+            "HTTPException",
+            "Query"
+          ]
+        },
+        {
+          "source": "..deps",
+          "specifiers": [
+            "require_api_key"
+          ]
+        },
+        {
+          "source": "..generic",
+          "specifiers": [
+            "get_vector_service"
+          ]
+        },
+        {
+          "source": "..schema",
+          "specifiers": [
+            "SearchHit",
+            "UpsertRequest",
+            "UpsertResponse"
+          ]
+        }
+      ],
+      "exports": [
+        "upsert_chunks",
+        "list_chunks",
+        "drop_policy"
+      ],
+      "totalLines": 77,
+      "hasStructuralAnalysis": true
+    },
+    "app/routers/health.py": {
+      "filePath": "app/routers/health.py",
+      "contentHash": "ba751362e76d9f7c4fd30f5efbc3d04956cd0275efa56312890be49c677bd3c9",
+      "functions": [
+        {
+          "name": "healthz",
+          "params": [],
+          "returnType": "dict",
+          "exported": true,
+          "lineCount": 2
+        },
+        {
+          "name": "example",
+          "params": [],
+          "returnType": "dict",
+          "exported": true,
+          "lineCount": 2
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "fastapi",
+          "specifiers": [
+            "APIRouter"
+          ]
+        },
+        {
+          "source": "..",
+          "specifiers": [
+            "__version__"
+          ]
+        }
+      ],
+      "exports": [
+        "healthz",
+        "example"
+      ],
+      "totalLines": 19,
+      "hasStructuralAnalysis": true
+    },
+    "app/routers/meta.py": {
+      "filePath": "app/routers/meta.py",
+      "contentHash": "c187d6a0f56870ee0306e949d1481674ce38d5212f3e8a6b47c0a3bbd5b8e0ab",
+      "functions": [
+        {
+          "name": "list_policies",
+          "params": [],
+          "returnType": "PolicyListResponse",
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "get_meta",
+          "params": [
+            "policy_id"
+          ],
+          "returnType": "TableMeta",
+          "exported": true,
+          "lineCount": 19
+        },
+        {
+          "name": "get_capabilities",
+          "params": [],
+          "returnType": "CapabilitiesResponse",
+          "exported": true,
+          "lineCount": 4
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "logging",
+          "specifiers": [
+            "logging"
+          ]
+        },
+        {
+          "source": "anyio",
+          "specifiers": [
+            "anyio"
+          ]
+        },
+        {
+          "source": "fastapi",
+          "specifiers": [
+            "APIRouter",
+            "Depends",
+            "HTTPException"
+          ]
+        },
+        {
+          "source": "..generic",
+          "specifiers": [
+            "get_vector_service"
+          ]
+        },
+        {
+          "source": "..deps",
+          "specifiers": [
+            "require_api_key"
+          ]
+        },
+        {
+          "source": "..schema",
+          "specifiers": [
+            "CapabilitiesResponse",
+            "PolicyListItem",
+            "PolicyListResponse",
+            "TableMeta"
+          ]
+        }
+      ],
+      "exports": [
+        "list_policies",
+        "get_meta",
+        "get_capabilities"
+      ],
+      "totalLines": 60,
+      "hasStructuralAnalysis": true
+    },
+    "app/routers/relations.py": {
+      "filePath": "app/routers/relations.py",
+      "contentHash": "1f50319ee9d3287f68daeb837fe2c21b3a4b548c7053dbad01b64eb1fc68dfa8",
+      "functions": [
+        {
+          "name": "expand_relations",
+          "params": [
+            "policy_id",
+            "body"
+          ],
+          "returnType": "ExpandResponse",
+          "exported": true,
+          "lineCount": 13
+        },
+        {
+          "name": "lookup_in_policy",
+          "params": [
+            "policy_id",
+            "target_policy_id",
+            "target_clause_id",
+            "include_content"
+          ],
+          "returnType": "LookupResponse",
+          "exported": true,
+          "lineCount": 15
+        },
+        {
+          "name": "lookup_dependents",
+          "params": [
+            "target_policy_id",
+            "target_clause_id"
+          ],
+          "returnType": "DependentsResponse",
+          "exported": true,
+          "lineCount": 14
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "logging",
+          "specifiers": [
+            "logging"
+          ]
+        },
+        {
+          "source": "functools",
+          "specifiers": [
+            "partial"
+          ]
+        },
+        {
+          "source": "anyio",
+          "specifiers": [
+            "anyio"
+          ]
+        },
+        {
+          "source": "fastapi",
+          "specifiers": [
+            "APIRouter",
+            "Depends",
+            "HTTPException",
+            "Query"
+          ]
+        },
+        {
+          "source": "..",
+          "specifiers": [
+            "store"
+          ]
+        },
+        {
+          "source": "..deps",
+          "specifiers": [
+            "require_api_key"
+          ]
+        },
+        {
+          "source": "..schema",
+          "specifiers": [
+            "DependentEntry",
+            "DependentsResponse",
+            "ExpandRequest",
+            "ExpandResponse",
+            "LookupResponse",
+            "SearchHit"
+          ]
+        }
+      ],
+      "exports": [
+        "expand_relations",
+        "lookup_in_policy",
+        "lookup_dependents"
+      ],
+      "totalLines": 82,
+      "hasStructuralAnalysis": true
+    },
+    "app/routers/search.py": {
+      "filePath": "app/routers/search.py",
+      "contentHash": "f38591940df8440c9ebf8cfd3bc9d15ab42fc2ba3066dee81042d68beb2f412e",
+      "functions": [
+        {
+          "name": "search",
+          "params": [
+            "policy_id",
+            "body"
+          ],
+          "returnType": "SearchResponse",
+          "exported": true,
+          "lineCount": 25
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "logging",
+          "specifiers": [
+            "logging"
+          ]
+        },
+        {
+          "source": "functools",
+          "specifiers": [
+            "partial"
+          ]
+        },
+        {
+          "source": "anyio",
+          "specifiers": [
+            "anyio"
+          ]
+        },
+        {
+          "source": "fastapi",
+          "specifiers": [
+            "APIRouter",
+            "Depends",
+            "HTTPException"
+          ]
+        },
+        {
+          "source": "..config",
+          "specifiers": [
+            "get_settings"
+          ]
+        },
+        {
+          "source": "..deps",
+          "specifiers": [
+            "require_api_key"
+          ]
+        },
+        {
+          "source": "..generic",
+          "specifiers": [
+            "get_vector_service"
+          ]
+        },
+        {
+          "source": "..schema",
+          "specifiers": [
+            "SearchRequest",
+            "SearchResponse"
+          ]
+        }
+      ],
+      "exports": [
+        "search"
+      ],
+      "totalLines": 56,
+      "hasStructuralAnalysis": true
+    },
+    "app/routers/v2.py": {
+      "filePath": "app/routers/v2.py",
+      "contentHash": "62e9ba974a78621060962d9b3ade7c5af0b18b1bf94d2985c434401d3b57a00e",
+      "functions": [
+        {
+          "name": "capabilities_v2",
+          "params": [],
+          "returnType": "CapabilitiesResponse",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "list_collections",
+          "params": [],
+          "returnType": "CollectionListResponse",
+          "exported": true,
+          "lineCount": 9
+        },
+        {
+          "name": "get_collection_meta",
+          "params": [
+            "collection_id"
+          ],
+          "returnType": "CollectionMeta",
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "drop_collection",
+          "params": [
+            "collection_id"
+          ],
+          "returnType": "dict",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "list_documents",
+          "params": [
+            "collection_id",
+            "where",
+            "limit",
+            "include_content"
+          ],
+          "returnType": "DocumentListResponse",
+          "exported": true,
+          "lineCount": 16
+        },
+        {
+          "name": "list_documents_alias",
+          "params": [
+            "collection_id",
+            "where",
+            "limit",
+            "include_content"
+          ],
+          "returnType": "DocumentListResponse",
+          "exported": true,
+          "lineCount": 12
+        },
+        {
+          "name": "upsert_documents",
+          "params": [
+            "collection_id",
+            "body"
+          ],
+          "returnType": "DocumentUpsertResponse",
+          "exported": true,
+          "lineCount": 15
+        },
+        {
+          "name": "upsert_documents_alias",
+          "params": [
+            "body"
+          ],
+          "returnType": "DocumentUpsertResponse",
+          "exported": true,
+          "lineCount": 9
+        },
+        {
+          "name": "collection_overwrite_by_prefix",
+          "params": [
+            "body"
+          ],
+          "returnType": "CollectionOverwriteByPrefixResponse",
+          "exported": true,
+          "lineCount": 22
+        },
+        {
+          "name": "search_documents",
+          "params": [
+            "collection_id",
+            "body"
+          ],
+          "returnType": "SearchResponseV2",
+          "exported": true,
+          "lineCount": 26
+        },
+        {
+          "name": "search_documents_alias",
+          "params": [
+            "body"
+          ],
+          "returnType": "SearchResponseV2",
+          "exported": true,
+          "lineCount": 15
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "functools",
+          "specifiers": [
+            "partial"
+          ]
+        },
+        {
+          "source": "anyio",
+          "specifiers": [
+            "anyio"
+          ]
+        },
+        {
+          "source": "fastapi",
+          "specifiers": [
+            "APIRouter",
+            "Depends",
+            "HTTPException",
+            "Query"
+          ]
+        },
+        {
+          "source": "..config",
+          "specifiers": [
+            "get_settings"
+          ]
+        },
+        {
+          "source": "..deps",
+          "specifiers": [
+            "require_api_key"
+          ]
+        },
+        {
+          "source": "..generic",
+          "specifiers": [
+            "get_vector_service"
+          ]
+        },
+        {
+          "source": "..schema_generic",
+          "specifiers": [
+            "CapabilitiesResponse",
+            "CollectionOverwriteByPrefixRequest",
+            "CollectionOverwriteByPrefixResponse",
+            "CollectionListItem",
+            "CollectionListResponse",
+            "CollectionMeta",
+            "DocumentListResponse",
+            "DocumentUpsertRequest",
+            "DocumentUpsertRequestWithCollection",
+            "DocumentUpsertResponse",
+            "SearchRequestV2",
+            "SearchRequestV2WithCollection",
+            "SearchResponseV2"
+          ]
+        }
+      ],
+      "exports": [
+        "capabilities_v2",
+        "list_collections",
+        "get_collection_meta",
+        "drop_collection",
+        "list_documents",
+        "list_documents_alias",
+        "upsert_documents",
+        "upsert_documents_alias",
+        "collection_overwrite_by_prefix",
+        "search_documents",
+        "search_documents_alias"
+      ],
+      "totalLines": 211,
+      "hasStructuralAnalysis": true
+    },
+    "app/schema_generic.py": {
+      "filePath": "app/schema_generic.py",
+      "contentHash": "b71b21532ff02904c2c5eb4909c880231c430c9dace2d434f253398de95eabf2",
+      "functions": [],
+      "classes": [
+        {
+          "name": "SchemaField",
+          "methods": [],
+          "properties": [
+            "name",
+            "type",
+            "nullable"
+          ],
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "CollectionListItem",
+          "methods": [],
+          "properties": [
+            "collection_id",
+            "n_documents",
+            "dim"
+          ],
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "CollectionListResponse",
+          "methods": [],
+          "properties": [
+            "collections"
+          ],
+          "exported": true,
+          "lineCount": 2
+        },
+        {
+          "name": "CollectionMeta",
+          "methods": [],
+          "properties": [
+            "collection_id",
+            "n_documents",
+            "n_original",
+            "n_derived",
+            "dim",
+            "has_vector_index",
+            "has_fts_index",
+            "built_at",
+            "schema_version",
+            "schema_fields",
+            "filterable_fields",
+            "searchable_fields"
+          ],
+          "exported": true,
+          "lineCount": 13
+        },
+        {
+          "name": "GenericDocumentInput",
+          "methods": [],
+          "properties": [
+            "document_id",
+            "content",
+            "content_tokenized",
+            "vector",
+            "metadata"
+          ],
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "GenericDocumentRecord",
+          "methods": [],
+          "properties": [
+            "document_id",
+            "score",
+            "content",
+            "metadata"
+          ],
+          "exported": true,
+          "lineCount": 5
+        },
+        {
+          "name": "DocumentListResponse",
+          "methods": [],
+          "properties": [
+            "documents"
+          ],
+          "exported": true,
+          "lineCount": 2
+        },
+        {
+          "name": "DocumentUpsertRequest",
+          "methods": [],
+          "properties": [
+            "documents",
+            "mode",
+            "expected_dim"
+          ],
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "DocumentUpsertResponse",
+          "methods": [],
+          "properties": [
+            "written",
+            "table_size",
+            "dim"
+          ],
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "SearchRequestV2",
+          "methods": [],
+          "properties": [
+            "query_tokenized",
+            "query_vector",
+            "top_n",
+            "top_m",
+            "rrf_k",
+            "where",
+            "include_content",
+            "include_derived",
+            "strategy"
+          ],
+          "exported": true,
+          "lineCount": 10
+        },
+        {
+          "name": "SearchRequestV2WithCollection",
+          "methods": [],
+          "properties": [
+            "collection_id"
+          ],
+          "exported": true,
+          "lineCount": 2
+        },
+        {
+          "name": "SearchResponseV2",
+          "methods": [],
+          "properties": [
+            "hits"
+          ],
+          "exported": true,
+          "lineCount": 2
+        },
+        {
+          "name": "DocumentUpsertRequestWithCollection",
+          "methods": [],
+          "properties": [
+            "collection_id"
+          ],
+          "exported": true,
+          "lineCount": 2
+        },
+        {
+          "name": "CollectionOverwriteByPrefixRequest",
+          "methods": [],
+          "properties": [
+            "collection_id",
+            "documents",
+            "expected_dim"
+          ],
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "CollectionOverwriteByPrefixResponse",
+          "methods": [],
+          "properties": [
+            "dropped_collections"
+          ],
+          "exported": true,
+          "lineCount": 2
+        },
+        {
+          "name": "CapabilitiesResponse",
+          "methods": [],
+          "properties": [
+            "api_version",
+            "generic_api",
+            "legacy_relations",
+            "legacy_ui",
+            "retrieval_modes",
+            "schema_version",
+            "features"
+          ],
+          "exported": true,
+          "lineCount": 8
+        }
+      ],
+      "imports": [
+        {
+          "source": "typing",
+          "specifiers": [
+            "Any",
+            "Literal"
+          ]
+        },
+        {
+          "source": "pydantic",
+          "specifiers": [
+            "BaseModel",
+            "Field"
+          ]
+        },
+        {
+          "source": ".schema",
+          "specifiers": [
+            "UpsertMode"
+          ]
+        }
+      ],
+      "exports": [
+        "SchemaField",
+        "CollectionListItem",
+        "CollectionListResponse",
+        "CollectionMeta",
+        "GenericDocumentInput",
+        "GenericDocumentRecord",
+        "DocumentListResponse",
+        "DocumentUpsertRequest",
+        "DocumentUpsertResponse",
+        "SearchRequestV2",
+        "SearchRequestV2WithCollection",
+        "SearchResponseV2",
+        "DocumentUpsertRequestWithCollection",
+        "CollectionOverwriteByPrefixRequest",
+        "CollectionOverwriteByPrefixResponse",
+        "CapabilitiesResponse"
+      ],
+      "totalLines": 116,
+      "hasStructuralAnalysis": true
+    },
+    "app/schema.py": {
+      "filePath": "app/schema.py",
+      "contentHash": "a59bebad6ac6be7b2253659b7bb56517fe3128f6e8ad12d97b1e637328e01700",
+      "functions": [
+        {
+          "name": "build_arrow_schema",
+          "params": [
+            "dim",
+            "metadata_fields",
+            "include_metadata_json"
+          ],
+          "returnType": "pa.Schema",
+          "exported": true,
+          "lineCount": 41
+        }
+      ],
+      "classes": [
+        {
+          "name": "RelationKey",
+          "methods": [],
+          "properties": [
+            "policy_id",
+            "clause_id"
+          ],
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "ChunkRow",
+          "methods": [
+            "_kind_lower"
+          ],
+          "properties": [
+            "chunk_id",
+            "content",
+            "content_tokenized",
+            "vector",
+            "heading_paths",
+            "directories",
+            "kind",
+            "parent_chunk_index",
+            "derived_seq",
+            "relation_keys",
+            "hop_depth",
+            "source",
+            "clause_id",
+            "metadata_json",
+            "metadata_scalars",
+            "built_at"
+          ],
+          "exported": true,
+          "lineCount": 24
+        },
+        {
+          "name": "UpsertRequest",
+          "methods": [],
+          "properties": [
+            "chunks",
+            "mode",
+            "expected_dim"
+          ],
+          "exported": true,
+          "lineCount": 7
+        },
+        {
+          "name": "UpsertResponse",
+          "methods": [],
+          "properties": [
+            "written",
+            "table_size",
+            "dim"
+          ],
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "SearchRequest",
+          "methods": [],
+          "properties": [
+            "query_tokenized",
+            "query_vector",
+            "top_n",
+            "top_m",
+            "rrf_k",
+            "where",
+            "include_content",
+            "include_derived"
+          ],
+          "exported": true,
+          "lineCount": 10
+        },
+        {
+          "name": "SearchHit",
+          "methods": [],
+          "properties": [
+            "chunk_id",
+            "score",
+            "content",
+            "heading_paths",
+            "directories",
+            "kind",
+            "parent_chunk_index",
+            "derived_seq",
+            "relation_keys",
+            "hop_depth",
+            "source",
+            "clause_id",
+            "metadata_json"
+          ],
+          "exported": true,
+          "lineCount": 14
+        },
+        {
+          "name": "SearchResponse",
+          "methods": [],
+          "properties": [
+            "hits"
+          ],
+          "exported": true,
+          "lineCount": 2
+        },
+        {
+          "name": "ExpandRequest",
+          "methods": [],
+          "properties": [
+            "chunk_id",
+            "include_content"
+          ],
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "ExpandResponse",
+          "methods": [],
+          "properties": [
+            "chunks"
+          ],
+          "exported": true,
+          "lineCount": 2
+        },
+        {
+          "name": "LookupResponse",
+          "methods": [],
+          "properties": [
+            "chunks"
+          ],
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "DependentEntry",
+          "methods": [],
+          "properties": [
+            "source_policy_id",
+            "n_hits"
+          ],
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "DependentsResponse",
+          "methods": [],
+          "properties": [
+            "dependents"
+          ],
+          "exported": true,
+          "lineCount": 2
+        },
+        {
+          "name": "TableMeta",
+          "methods": [],
+          "properties": [
+            "policy_id",
+            "n_chunks",
+            "n_original",
+            "n_derived",
+            "dim",
+            "has_vector_index",
+            "has_fts_index",
+            "built_at",
+            "schema_version",
+            "schema_fields",
+            "filterable_fields",
+            "searchable_fields"
+          ],
+          "exported": true,
+          "lineCount": 13
+        },
+        {
+          "name": "PolicyListItem",
+          "methods": [],
+          "properties": [
+            "policy_id",
+            "n_chunks",
+            "dim"
+          ],
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "PolicyListResponse",
+          "methods": [],
+          "properties": [
+            "policies"
+          ],
+          "exported": true,
+          "lineCount": 2
+        },
+        {
+          "name": "CapabilitiesResponse",
+          "methods": [],
+          "properties": [
+            "api_version",
+            "generic_api",
+            "legacy_relations",
+            "legacy_ui",
+            "retrieval_modes",
+            "schema_version",
+            "features"
+          ],
+          "exported": true,
+          "lineCount": 8
+        }
+      ],
+      "imports": [
+        {
+          "source": "typing",
+          "specifiers": [
+            "Any",
+            "Literal"
+          ]
+        },
+        {
+          "source": "pyarrow",
+          "specifiers": [
+            "pa"
+          ]
+        },
+        {
+          "source": "pydantic",
+          "specifiers": [
+            "BaseModel",
+            "Field",
+            "field_validator"
+          ]
+        }
+      ],
+      "exports": [
+        "build_arrow_schema",
+        "RelationKey",
+        "ChunkRow",
+        "UpsertRequest",
+        "UpsertResponse",
+        "SearchRequest",
+        "SearchHit",
+        "SearchResponse",
+        "ExpandRequest",
+        "ExpandResponse",
+        "LookupResponse",
+        "DependentEntry",
+        "DependentsResponse",
+        "TableMeta",
+        "PolicyListItem",
+        "PolicyListResponse",
+        "CapabilitiesResponse"
+      ],
+      "totalLines": 214,
+      "hasStructuralAnalysis": true
+    },
+    "app/static/ui.html": {
+      "filePath": "app/static/ui.html",
+      "contentHash": "c53f76f3bfab532eb0ec2abdb93b332f114419ee3031507467b016b0e42846f9",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 518,
+      "hasStructuralAnalysis": false
+    },
+    "app/store.py": {
+      "filePath": "app/store.py",
+      "contentHash": "17f7447ba0d8ba6b105a5d47dc39562c06571cba71a21497b4dc8d7b3d27f812",
+      "functions": [
+        {
+          "name": "_get_write_lock",
+          "params": [
+            "policy_id"
+          ],
+          "returnType": "threading.Lock",
+          "exported": true,
+          "lineCount": 5
+        },
+        {
+          "name": "_evict_and_release",
+          "params": [
+            "policy_id"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 15
+        },
+        {
+          "name": "_drop_table_with_retry",
+          "params": [
+            "db",
+            "name",
+            "attempts"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 31
+        },
+        {
+          "name": "_truncate_and_add",
+          "params": [
+            "tbl",
+            "batch"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 11
+        },
+        {
+          "name": "_overwrite_or_create",
+          "params": [
+            "db",
+            "policy_id",
+            "name",
+            "batch",
+            "dim",
+            "existing_dim"
+          ],
+          "exported": true,
+          "lineCount": 41
+        },
+        {
+          "name": "_safe_policy_dir",
+          "params": [
+            "policy_id"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "_decode_policy_id",
+          "params": [
+            "safe_name"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 9
+        },
+        {
+          "name": "_connect",
+          "params": [],
+          "exported": true,
+          "lineCount": 11
+        },
+        {
+          "name": "_all_table_names",
+          "params": [
+            "db"
+          ],
+          "returnType": "list[str]",
+          "exported": true,
+          "lineCount": 35
+        },
+        {
+          "name": "_table_path",
+          "params": [
+            "policy_id"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "table_exists",
+          "params": [
+            "policy_id"
+          ],
+          "returnType": "bool",
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "open_table",
+          "params": [
+            "policy_id"
+          ],
+          "exported": true,
+          "lineCount": 14
+        },
+        {
+          "name": "drop_table",
+          "params": [
+            "policy_id"
+          ],
+          "returnType": "bool",
+          "exported": true,
+          "lineCount": 10
+        },
+        {
+          "name": "list_policies",
+          "params": [],
+          "returnType": "list[tuple[str, int, int]]",
+          "exported": true,
+          "lineCount": 18
+        },
+        {
+          "name": "_row_to_arrow_dict",
+          "params": [
+            "row"
+          ],
+          "returnType": "dict[str, Any]",
+          "exported": true,
+          "lineCount": 25
+        },
+        {
+          "name": "_metadata_fields_from_schema",
+          "params": [
+            "schema"
+          ],
+          "returnType": "dict[str, pa.DataType]",
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "_infer_metadata_dtype",
+          "params": [
+            "values"
+          ],
+          "returnType": "pa.DataType",
+          "exported": true,
+          "lineCount": 13
+        },
+        {
+          "name": "_metadata_fields_from_rows",
+          "params": [
+            "rows"
+          ],
+          "returnType": "dict[str, pa.DataType]",
+          "exported": true,
+          "lineCount": 8
+        },
+        {
+          "name": "_merge_metadata_dtype",
+          "params": [
+            "a",
+            "b"
+          ],
+          "returnType": "pa.DataType",
+          "exported": true,
+          "lineCount": 14
+        },
+        {
+          "name": "_coerce_metadata_value",
+          "params": [
+            "value",
+            "dtype"
+          ],
+          "returnType": "Any",
+          "exported": true,
+          "lineCount": 30
+        },
+        {
+          "name": "_normalize_row_for_schema",
+          "params": [
+            "row",
+            "schema",
+            "dim"
+          ],
+          "returnType": "dict[str, Any]",
+          "exported": true,
+          "lineCount": 46
+        },
+        {
+          "name": "_build_record_batch",
+          "params": [
+            "rows",
+            "dim",
+            "metadata_fields",
+            "include_metadata_json"
+          ],
+          "returnType": "pa.RecordBatch",
+          "exported": true,
+          "lineCount": 14
+        },
+        {
+          "name": "_detect_dim",
+          "params": [
+            "tbl"
+          ],
+          "returnType": "int",
+          "exported": true,
+          "lineCount": 14
+        },
+        {
+          "name": "_has_index_on",
+          "params": [
+            "tbl",
+            "column"
+          ],
+          "returnType": "bool",
+          "exported": true,
+          "lineCount": 11
+        },
+        {
+          "name": "ensure_indexes",
+          "params": [
+            "tbl"
+          ],
+          "returnType": "dict[str, bool]",
+          "exported": true,
+          "lineCount": 59
+        },
+        {
+          "name": "_infer_dim",
+          "params": [
+            "rows",
+            "expected"
+          ],
+          "returnType": "int",
+          "exported": true,
+          "lineCount": 7
+        },
+        {
+          "name": "_auto_embed_missing_vectors",
+          "params": [
+            "policy_id",
+            "rows",
+            "expected_dim",
+            "existing_dim"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 53
+        },
+        {
+          "name": "_all_rows",
+          "params": [
+            "tbl"
+          ],
+          "returnType": "list[dict[str, Any]]",
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "_build_batch_from_raw_rows",
+          "params": [
+            "rows",
+            "schema",
+            "dim"
+          ],
+          "returnType": "pa.RecordBatch",
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "upsert",
+          "params": [
+            "policy_id",
+            "rows",
+            "mode",
+            "expected_dim"
+          ],
+          "returnType": "dict",
+          "exported": true,
+          "lineCount": 137
+        },
+        {
+          "name": "_row_count",
+          "params": [
+            "policy_id"
+          ],
+          "returnType": "int",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "_existing_dim",
+          "params": [
+            "policy_id"
+          ],
+          "returnType": "int",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "_row_to_hit",
+          "params": [
+            "row",
+            "include_content"
+          ],
+          "returnType": "SearchHit",
+          "exported": true,
+          "lineCount": 34
+        },
+        {
+          "name": "_table_columns",
+          "params": [
+            "tbl"
+          ],
+          "returnType": "set[str]",
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "_select_columns",
+          "params": [
+            "include_content",
+            "available_columns"
+          ],
+          "returnType": "list[str]",
+          "exported": true,
+          "lineCount": 18
+        },
+        {
+          "name": "_safe_search_to_list",
+          "params": [
+            "query",
+            "top_k"
+          ],
+          "returnType": "list[dict]",
+          "exported": true,
+          "lineCount": 8
+        },
+        {
+          "name": "hybrid_search",
+          "params": [
+            "policy_id",
+            "query_tokenized",
+            "query_vector",
+            "top_n",
+            "top_m",
+            "rrf_k",
+            "where",
+            "include_content",
+            "include_derived"
+          ],
+          "returnType": "list[SearchHit]",
+          "exported": true,
+          "lineCount": 113
+        },
+        {
+          "name": "list_chunks",
+          "params": [
+            "policy_id",
+            "where",
+            "limit",
+            "include_content"
+          ],
+          "returnType": "list[SearchHit]",
+          "exported": true,
+          "lineCount": 16
+        },
+        {
+          "name": "expand_relations",
+          "params": [
+            "policy_id",
+            "chunk_id",
+            "include_content"
+          ],
+          "returnType": "list[SearchHit]",
+          "exported": true,
+          "lineCount": 15
+        },
+        {
+          "name": "lookup_relations",
+          "params": [
+            "policy_id",
+            "target_policy_id",
+            "target_clause_id",
+            "include_content"
+          ],
+          "returnType": "list[SearchHit]",
+          "exported": true,
+          "lineCount": 33
+        },
+        {
+          "name": "lookup_dependents",
+          "params": [
+            "target_policy_id",
+            "target_clause_id"
+          ],
+          "returnType": "list[tuple[str, int]]",
+          "exported": true,
+          "lineCount": 16
+        },
+        {
+          "name": "table_meta",
+          "params": [
+            "policy_id"
+          ],
+          "returnType": "dict",
+          "exported": true,
+          "lineCount": 33
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "base64",
+          "specifiers": [
+            "base64"
+          ]
+        },
+        {
+          "source": "logging",
+          "specifiers": [
+            "logging"
+          ]
+        },
+        {
+          "source": "os",
+          "specifiers": [
+            "os"
+          ]
+        },
+        {
+          "source": "threading",
+          "specifiers": [
+            "threading"
+          ]
+        },
+        {
+          "source": "time",
+          "specifiers": [
+            "time"
+          ]
+        },
+        {
+          "source": "typing",
+          "specifiers": [
+            "Any"
+          ]
+        },
+        {
+          "source": "pyarrow",
+          "specifiers": [
+            "pa"
+          ]
+        },
+        {
+          "source": ".config",
+          "specifiers": [
+            "get_settings"
+          ]
+        },
+        {
+          "source": ".embedding_fallback",
+          "specifiers": [
+            "embed_query",
+            "embed_texts"
+          ]
+        },
+        {
+          "source": ".schema",
+          "specifiers": [
+            "ChunkRow",
+            "RelationKey",
+            "SearchHit",
+            "build_arrow_schema"
+          ]
+        }
+      ],
+      "exports": [
+        "_get_write_lock",
+        "_evict_and_release",
+        "_drop_table_with_retry",
+        "_truncate_and_add",
+        "_overwrite_or_create",
+        "_safe_policy_dir",
+        "_decode_policy_id",
+        "_connect",
+        "_all_table_names",
+        "_table_path",
+        "table_exists",
+        "open_table",
+        "drop_table",
+        "list_policies",
+        "_row_to_arrow_dict",
+        "_metadata_fields_from_schema",
+        "_infer_metadata_dtype",
+        "_metadata_fields_from_rows",
+        "_merge_metadata_dtype",
+        "_coerce_metadata_value",
+        "_normalize_row_for_schema",
+        "_build_record_batch",
+        "_detect_dim",
+        "_has_index_on",
+        "ensure_indexes",
+        "_infer_dim",
+        "_auto_embed_missing_vectors",
+        "_all_rows",
+        "_build_batch_from_raw_rows",
+        "upsert",
+        "_row_count",
+        "_existing_dim",
+        "_row_to_hit",
+        "_table_columns",
+        "_select_columns",
+        "_safe_search_to_list",
+        "hybrid_search",
+        "list_chunks",
+        "expand_relations",
+        "lookup_relations",
+        "lookup_dependents",
+        "table_meta"
+      ],
+      "totalLines": 1106,
+      "hasStructuralAnalysis": true
+    },
+    "app/ui_gradio_generic.py": {
+      "filePath": "app/ui_gradio_generic.py",
+      "contentHash": "81d031ffcfc1f0bf2d51b0c1587427b795b31d8ee27f67702e1becd2862f7d0b",
+      "functions": [
+        {
+          "name": "_tokenize_query",
+          "params": [
+            "text"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "_embed_query",
+          "params": [
+            "text"
+          ],
+          "returnType": "tuple[list[float], str]",
+          "exported": true,
+          "lineCount": 29
+        },
+        {
+          "name": "_vector_sparkline",
+          "params": [
+            "vec"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 17
+        },
+        {
+          "name": "_dump",
+          "params": [
+            "obj"
+          ],
+          "returnType": "dict[str, Any]",
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "_list_collections",
+          "params": [],
+          "returnType": "list[tuple[str, int, int]]",
+          "exported": true,
+          "lineCount": 2
+        },
+        {
+          "name": "_refresh_collection_list",
+          "params": [],
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "_load_meta",
+          "params": [
+            "collection_id"
+          ],
+          "exported": true,
+          "lineCount": 23
+        },
+        {
+          "name": "_browse_documents",
+          "params": [
+            "collection_id",
+            "where",
+            "page",
+            "page_size",
+            "include_content",
+            "show_vector"
+          ],
+          "exported": true,
+          "lineCount": 52
+        },
+        {
+          "name": "_search_documents",
+          "params": [
+            "collection_id",
+            "query_text",
+            "top_n",
+            "top_m",
+            "rrf_k",
+            "where",
+            "include_derived",
+            "skip_embedding"
+          ],
+          "exported": true,
+          "lineCount": 69
+        },
+        {
+          "name": "_drop_collection",
+          "params": [
+            "collection_id",
+            "confirm"
+          ],
+          "exported": true,
+          "lineCount": 13
+        },
+        {
+          "name": "build_generic_demo",
+          "params": [],
+          "returnType": "gr.Blocks",
+          "exported": true,
+          "lineCount": 142
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "json",
+          "specifiers": [
+            "json"
+          ]
+        },
+        {
+          "source": "logging",
+          "specifiers": [
+            "logging"
+          ]
+        },
+        {
+          "source": "os",
+          "specifiers": [
+            "os"
+          ]
+        },
+        {
+          "source": "re",
+          "specifiers": [
+            "re"
+          ]
+        },
+        {
+          "source": "typing",
+          "specifiers": [
+            "Any"
+          ]
+        },
+        {
+          "source": "gradio",
+          "specifiers": [
+            "gr"
+          ]
+        },
+        {
+          "source": ".generic",
+          "specifiers": [
+            "get_vector_service"
+          ]
+        }
+      ],
+      "exports": [
+        "_tokenize_query",
+        "_embed_query",
+        "_vector_sparkline",
+        "_dump",
+        "_list_collections",
+        "_refresh_collection_list",
+        "_load_meta",
+        "_browse_documents",
+        "_search_documents",
+        "_drop_collection",
+        "build_generic_demo"
+      ],
+      "totalLines": 413,
+      "hasStructuralAnalysis": true
+    },
+    "app/ui_gradio.py": {
+      "filePath": "app/ui_gradio.py",
+      "contentHash": "a37739b199918d84d65aeb0c65a8cebdae3648b12e12df664faf99c74d017134",
+      "functions": [
+        {
+          "name": "_http_request",
+          "params": [
+            "method",
+            "path",
+            "params",
+            "json_body",
+            "allow_not_found"
+          ],
+          "returnType": "dict | list | None",
+          "exported": true,
+          "lineCount": 27
+        },
+        {
+          "name": "_normalize_hit_dict",
+          "params": [
+            "hit"
+          ],
+          "returnType": "dict[str, Any]",
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "_svc_list_policies",
+          "params": [],
+          "returnType": "list[tuple[str, int, int]]",
+          "exported": true,
+          "lineCount": 14
+        },
+        {
+          "name": "_svc_table_meta",
+          "params": [
+            "policy_id"
+          ],
+          "returnType": "dict",
+          "exported": true,
+          "lineCount": 11
+        },
+        {
+          "name": "_svc_list_chunks",
+          "params": [
+            "policy_id",
+            "where",
+            "limit",
+            "include_content"
+          ],
+          "returnType": "list[dict[str, Any]]",
+          "exported": true,
+          "lineCount": 30
+        },
+        {
+          "name": "_svc_search",
+          "params": [
+            "policy_id",
+            "body"
+          ],
+          "returnType": "list[dict[str, Any]]",
+          "exported": true,
+          "lineCount": 23
+        },
+        {
+          "name": "_svc_drop_policy",
+          "params": [
+            "policy_id"
+          ],
+          "returnType": "bool",
+          "exported": true,
+          "lineCount": 5
+        },
+        {
+          "name": "_load_bm25_tokenize",
+          "params": [],
+          "exported": true,
+          "lineCount": 17
+        },
+        {
+          "name": "_tokenize_query",
+          "params": [
+            "text"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 16
+        },
+        {
+          "name": "_embed_query",
+          "params": [
+            "text"
+          ],
+          "returnType": "tuple[list[float], str]",
+          "exported": true,
+          "lineCount": 38
+        },
+        {
+          "name": "_vector_sparkline",
+          "params": [
+            "vec"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 20
+        },
+        {
+          "name": "_list_policies_choices",
+          "params": [],
+          "returnType": "list[tuple[str, str]]",
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "_refresh_dataset_list",
+          "params": [],
+          "exported": true,
+          "lineCount": 9
+        },
+        {
+          "name": "_load_meta",
+          "params": [
+            "policy_id"
+          ],
+          "exported": true,
+          "lineCount": 38
+        },
+        {
+          "name": "_browse_rows",
+          "params": [
+            "policy_id",
+            "where",
+            "page",
+            "page_size",
+            "include_content",
+            "show_vector"
+          ],
+          "exported": true,
+          "lineCount": 93
+        },
+        {
+          "name": "_do_search",
+          "params": [
+            "policy_id",
+            "query_text",
+            "top_n",
+            "top_m",
+            "rrf_k",
+            "where",
+            "include_derived",
+            "skip_embedding"
+          ],
+          "exported": true,
+          "lineCount": 85
+        },
+        {
+          "name": "_drop_policy",
+          "params": [
+            "policy_id",
+            "confirm"
+          ],
+          "exported": true,
+          "lineCount": 13
+        },
+        {
+          "name": "build_demo",
+          "params": [],
+          "returnType": "gr.Blocks",
+          "exported": true,
+          "lineCount": 186
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "json",
+          "specifiers": [
+            "json"
+          ]
+        },
+        {
+          "source": "logging",
+          "specifiers": [
+            "logging"
+          ]
+        },
+        {
+          "source": "os",
+          "specifiers": [
+            "os"
+          ]
+        },
+        {
+          "source": "urllib.parse",
+          "specifiers": [
+            "quote"
+          ]
+        },
+        {
+          "source": "typing",
+          "specifiers": [
+            "Any"
+          ]
+        },
+        {
+          "source": "gradio",
+          "specifiers": [
+            "gr"
+          ]
+        },
+        {
+          "source": ".config",
+          "specifiers": [
+            "get_settings"
+          ]
+        },
+        {
+          "source": ".",
+          "specifiers": [
+            "store"
+          ]
+        }
+      ],
+      "exports": [
+        "_http_request",
+        "_normalize_hit_dict",
+        "_svc_list_policies",
+        "_svc_table_meta",
+        "_svc_list_chunks",
+        "_svc_search",
+        "_svc_drop_policy",
+        "_load_bm25_tokenize",
+        "_tokenize_query",
+        "_embed_query",
+        "_vector_sparkline",
+        "_list_policies_choices",
+        "_refresh_dataset_list",
+        "_load_meta",
+        "_browse_rows",
+        "_do_search",
+        "_drop_policy",
+        "build_demo"
+      ],
+      "totalLines": 728,
+      "hasStructuralAnalysis": true
+    },
+    "AUTHOR": {
+      "filePath": "AUTHOR",
+      "contentHash": "778a5f07c22acbb485a0d131230157dcc94dd77fc40775a4536578823ebade1c",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 5,
+      "hasStructuralAnalysis": false
+    },
+    "diagnose_replicas.py": {
+      "filePath": "diagnose_replicas.py",
+      "contentHash": "8dc05fe61fbc9b75273fe8d625d4d2881900de553714ffac162c75f74607cd87",
+      "functions": [
+        {
+          "name": "headers",
+          "params": [],
+          "returnType": "dict[str, str]",
+          "exported": true,
+          "lineCount": 2
+        },
+        {
+          "name": "_fingerprint",
+          "params": [
+            "resp"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "probe_meta",
+          "params": [
+            "client"
+          ],
+          "returnType": "bool",
+          "exported": true,
+          "lineCount": 27
+        },
+        {
+          "name": "probe_list",
+          "params": [
+            "client"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 21
+        },
+        {
+          "name": "probe_chunks",
+          "params": [
+            "client"
+          ],
+          "returnType": "list[str]",
+          "exported": true,
+          "lineCount": 33
+        },
+        {
+          "name": "probe_search",
+          "params": [
+            "client",
+            "probes"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 56
+        },
+        {
+          "name": "main",
+          "params": [],
+          "returnType": "int",
+          "exported": true,
+          "lineCount": 22
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "json",
+          "specifiers": [
+            "json"
+          ]
+        },
+        {
+          "source": "sys",
+          "specifiers": [
+            "sys"
+          ]
+        },
+        {
+          "source": "collections",
+          "specifiers": [
+            "Counter"
+          ]
+        },
+        {
+          "source": "urllib.parse",
+          "specifiers": [
+            "quote"
+          ]
+        },
+        {
+          "source": "httpx",
+          "specifiers": [
+            "httpx"
+          ]
+        }
+      ],
+      "exports": [
+        "headers",
+        "_fingerprint",
+        "probe_meta",
+        "probe_list",
+        "probe_chunks",
+        "probe_search",
+        "main"
+      ],
+      "totalLines": 224,
+      "hasStructuralAnalysis": true
+    },
+    "docs/lancedb_v2_api.md": {
+      "filePath": "docs/lancedb_v2_api.md",
+      "contentHash": "0fb8baf6c78977168b540737bf1a11bc2c617b0c2df8bfcd21156bbdb0cb323f",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 631,
+      "hasStructuralAnalysis": true
+    },
+    "docs/migration_runbook.md": {
+      "filePath": "docs/migration_runbook.md",
+      "contentHash": "57a849e709f6a6f85b6abe508ef49d7ad507ae974342b97534374ada22fc82c6",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 67,
+      "hasStructuralAnalysis": true
+    },
+    "main.py": {
+      "filePath": "main.py",
+      "contentHash": "18787eb4728e8cf92514ec837e7e38f520b9c7e8f8727cdcae7598f1e3c8969a",
+      "functions": [
+        {
+          "name": "main",
+          "params": [],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 20
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "importlib",
+          "specifiers": [
+            "importlib"
+          ]
+        },
+        {
+          "source": "os",
+          "specifiers": [
+            "os"
+          ]
+        },
+        {
+          "source": "app.config",
+          "specifiers": [
+            "get_settings"
+          ]
+        }
+      ],
+      "exports": [
+        "main"
+      ],
+      "totalLines": 39,
+      "hasStructuralAnalysis": true
+    },
+    "pyproject.toml": {
+      "filePath": "pyproject.toml",
+      "contentHash": "c9f13a93fbda17d9fa58835072308204c080110f9cd2ae852422c81c18dfa9e9",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 34,
+      "hasStructuralAnalysis": true
+    },
+    "README.md": {
+      "filePath": "README.md",
+      "contentHash": "79e1b6d1b5a04827418af8e76606541a3a046c8383d19ec0809ea87f854358fa",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 183,
+      "hasStructuralAnalysis": true
+    },
+    "requirements.txt": {
+      "filePath": "requirements.txt",
+      "contentHash": "7cf45ceeb4f7dbc5b8587e05aa8e9de56464a66b6e54eadce2930bfda5603b11",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 13,
+      "hasStructuralAnalysis": false
+    },
+    "retrieval/__init__.py": {
+      "filePath": "retrieval/__init__.py",
+      "contentHash": "058d35c65e4dfb0e9b3a677e676c4972e0de2a1107608046a06b5ec2e817b4c6",
+      "functions": [],
+      "classes": [],
+      "imports": [
+        {
+          "source": ".hybrid",
+          "specifiers": [
+            "hybrid_search"
+          ]
+        }
+      ],
+      "exports": [],
+      "totalLines": 17,
+      "hasStructuralAnalysis": true
+    },
+    "retrieval/bm25.py": {
+      "filePath": "retrieval/bm25.py",
+      "contentHash": "752c07cdb8cbfd99bb540a8bdb442511dab79920f558a2d76a6a9d31430bcaed",
+      "functions": [
+        {
+          "name": "tokenize",
+          "params": [
+            "text"
+          ],
+          "returnType": "list[str]",
+          "exported": true,
+          "lineCount": 20
+        },
+        {
+          "name": "build",
+          "params": [
+            "corpus_texts"
+          ],
+          "returnType": "dict[str, Any]",
+          "exported": true,
+          "lineCount": 8
+        },
+        {
+          "name": "save",
+          "params": [
+            "index",
+            "path"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "load",
+          "params": [
+            "path"
+          ],
+          "returnType": "dict[str, Any] | None",
+          "exported": true,
+          "lineCount": 13
+        },
+        {
+          "name": "search",
+          "params": [
+            "index",
+            "query",
+            "top_k"
+          ],
+          "returnType": "list[tuple[int, float]]",
+          "exported": true,
+          "lineCount": 15
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "logging",
+          "specifiers": [
+            "logging"
+          ]
+        },
+        {
+          "source": "os",
+          "specifiers": [
+            "os"
+          ]
+        },
+        {
+          "source": "pickle",
+          "specifiers": [
+            "pickle"
+          ]
+        },
+        {
+          "source": "re",
+          "specifiers": [
+            "re"
+          ]
+        },
+        {
+          "source": "typing",
+          "specifiers": [
+            "Any"
+          ]
+        }
+      ],
+      "exports": [
+        "tokenize",
+        "build",
+        "save",
+        "load",
+        "search"
+      ],
+      "totalLines": 101,
+      "hasStructuralAnalysis": true
+    },
+    "retrieval/hybrid.py": {
+      "filePath": "retrieval/hybrid.py",
+      "contentHash": "8cf1653d654682fdf1ee94ea36105f4ab2895c05b6feffae4b88a6aabbdf52c2",
+      "functions": [
+        {
+          "name": "_resolve_root_dir",
+          "params": [
+            "policy_id"
+          ],
+          "returnType": "Optional[str]",
+          "exported": true,
+          "lineCount": 9
+        },
+        {
+          "name": "index_paths",
+          "params": [
+            "root_dir"
+          ],
+          "returnType": "dict[str, str]",
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "_read_chunks_jsonl",
+          "params": [
+            "path"
+          ],
+          "returnType": "list[KnowledgeChunk]",
+          "exported": true,
+          "lineCount": 23
+        },
+        {
+          "name": "_load_artifacts",
+          "params": [
+            "policy_id"
+          ],
+          "returnType": "Optional[_PolicyArtifacts]",
+          "exported": true,
+          "lineCount": 31
+        },
+        {
+          "name": "invalidate",
+          "params": [
+            "policy_id"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 7
+        },
+        {
+          "name": "hybrid_search",
+          "params": [
+            "question",
+            "policy_id",
+            "top_n",
+            "top_m",
+            "rrf_k"
+          ],
+          "returnType": "list[KnowledgeChunk]",
+          "exported": true,
+          "lineCount": 53
+        }
+      ],
+      "classes": [
+        {
+          "name": "_PolicyArtifacts",
+          "methods": [],
+          "properties": [
+            "root_dir",
+            "chunks",
+            "bm25_index",
+            "embeddings"
+          ],
+          "exported": true,
+          "lineCount": 5
+        }
+      ],
+      "imports": [
+        {
+          "source": "asyncio",
+          "specifiers": [
+            "asyncio"
+          ]
+        },
+        {
+          "source": "json",
+          "specifiers": [
+            "json"
+          ]
+        },
+        {
+          "source": "logging",
+          "specifiers": [
+            "logging"
+          ]
+        },
+        {
+          "source": "os",
+          "specifiers": [
+            "os"
+          ]
+        },
+        {
+          "source": "dataclasses",
+          "specifiers": [
+            "dataclass"
+          ]
+        },
+        {
+          "source": "typing",
+          "specifiers": [
+            "Optional"
+          ]
+        },
+        {
+          "source": "reasoner.v3.chunk_builder",
+          "specifiers": [
+            "KnowledgeChunk"
+          ]
+        },
+        {
+          "source": ".",
+          "specifiers": [
+            "bm25_mod"
+          ]
+        },
+        {
+          "source": ".",
+          "specifiers": [
+            "rrf_mod"
+          ]
+        },
+        {
+          "source": ".",
+          "specifiers": [
+            "semantic_mod"
+          ]
+        }
+      ],
+      "exports": [
+        "_resolve_root_dir",
+        "index_paths",
+        "_PolicyArtifacts",
+        "_read_chunks_jsonl",
+        "_load_artifacts",
+        "invalidate",
+        "hybrid_search"
+      ],
+      "totalLines": 199,
+      "hasStructuralAnalysis": true
+    },
+    "retrieval/indexer.py": {
+      "filePath": "retrieval/indexer.py",
+      "contentHash": "5b08322f16d82b016c82884c3f60c2e4b34cb4b64e538817e06ffe4e28c91710",
+      "functions": [
+        {
+          "name": "_serialize_chunk",
+          "params": [
+            "c"
+          ],
+          "returnType": "dict",
+          "exported": true,
+          "lineCount": 7
+        },
+        {
+          "name": "_write_chunks_jsonl",
+          "params": [
+            "path",
+            "chunks"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 7
+        },
+        {
+          "name": "build_for_root",
+          "params": [
+            "root_dir",
+            "chunk_size",
+            "embedding_batch_size",
+            "embedding_model",
+            "skip_embedding"
+          ],
+          "returnType": "dict",
+          "exported": true,
+          "lineCount": 56
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "json",
+          "specifiers": [
+            "json"
+          ]
+        },
+        {
+          "source": "logging",
+          "specifiers": [
+            "logging"
+          ]
+        },
+        {
+          "source": "os",
+          "specifiers": [
+            "os"
+          ]
+        },
+        {
+          "source": "typing",
+          "specifiers": [
+            "Optional"
+          ]
+        },
+        {
+          "source": "reasoner.v3.chunk_builder",
+          "specifiers": [
+            "KnowledgeChunk",
+            "build_knowledge_chunks"
+          ]
+        },
+        {
+          "source": "..",
+          "specifiers": [
+            "config"
+          ]
+        },
+        {
+          "source": ".",
+          "specifiers": [
+            "bm25_mod"
+          ]
+        },
+        {
+          "source": ".",
+          "specifiers": [
+            "semantic_mod"
+          ]
+        }
+      ],
+      "exports": [
+        "_serialize_chunk",
+        "_write_chunks_jsonl",
+        "build_for_root"
+      ],
+      "totalLines": 104,
+      "hasStructuralAnalysis": true
+    },
+    "retrieval/rrf.py": {
+      "filePath": "retrieval/rrf.py",
+      "contentHash": "655f771170f964e89a3e46d57cb75c021b5c0862a394369dbf91639612b5b0fe",
+      "functions": [
+        {
+          "name": "reciprocal_rank_fusion",
+          "params": [
+            "rank_lists",
+            "k",
+            "top_k"
+          ],
+          "returnType": "list[tuple[int, float]]",
+          "exported": true,
+          "lineCount": 21
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "typing",
+          "specifiers": [
+            "Iterable"
+          ]
+        },
+        {
+          "source": "..",
+          "specifiers": [
+            "config"
+          ]
+        }
+      ],
+      "exports": [
+        "reciprocal_rank_fusion"
+      ],
+      "totalLines": 37,
+      "hasStructuralAnalysis": true
+    },
+    "retrieval/semantic.py": {
+      "filePath": "retrieval/semantic.py",
+      "contentHash": "587cf362001a974d364ac96d20a1f732a3ebb706aeb1993b6d464cdf4da7c07a",
+      "functions": [
+        {
+          "name": "load",
+          "params": [
+            "path"
+          ],
+          "exported": true,
+          "lineCount": 19
+        },
+        {
+          "name": "save",
+          "params": [
+            "matrix",
+            "path"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "search_with_query_vec",
+          "params": [
+            "matrix",
+            "query_vec",
+            "top_k"
+          ],
+          "returnType": "list[tuple[int, float]]",
+          "exported": true,
+          "lineCount": 30
+        },
+        {
+          "name": "search",
+          "params": [
+            "matrix",
+            "query",
+            "top_k",
+            "model"
+          ],
+          "returnType": "list[tuple[int, float]]",
+          "exported": true,
+          "lineCount": 27
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "logging",
+          "specifiers": [
+            "logging"
+          ]
+        },
+        {
+          "source": "os",
+          "specifiers": [
+            "os"
+          ]
+        },
+        {
+          "source": "typing",
+          "specifiers": [
+            "Optional"
+          ]
+        }
+      ],
+      "exports": [
+        "load",
+        "save",
+        "search_with_query_vec",
+        "search"
+      ],
+      "totalLines": 107,
+      "hasStructuralAnalysis": true
+    },
+    "scripts/shadow_compare.py": {
+      "filePath": "scripts/shadow_compare.py",
+      "contentHash": "eb18100df9a3b1db773093276637cc76e57827305f1be1f08bc10e63ee1d313b",
+      "functions": [
+        {
+          "name": "_load_queries",
+          "params": [
+            "path"
+          ],
+          "returnType": "list[dict[str, Any]]",
+          "exported": true,
+          "lineCount": 8
+        },
+        {
+          "name": "_call_search",
+          "params": [
+            "client",
+            "base_url",
+            "policy_id",
+            "body",
+            "api_key"
+          ],
+          "returnType": "tuple[list[dict[str, Any]], float]",
+          "exported": true,
+          "lineCount": 17
+        },
+        {
+          "name": "_extract_ids",
+          "params": [
+            "hits",
+            "top_k"
+          ],
+          "returnType": "list[str]",
+          "exported": true,
+          "lineCount": 8
+        },
+        {
+          "name": "main",
+          "params": [],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 49
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "argparse",
+          "specifiers": [
+            "argparse"
+          ]
+        },
+        {
+          "source": "json",
+          "specifiers": [
+            "json"
+          ]
+        },
+        {
+          "source": "statistics",
+          "specifiers": [
+            "statistics"
+          ]
+        },
+        {
+          "source": "time",
+          "specifiers": [
+            "time"
+          ]
+        },
+        {
+          "source": "pathlib",
+          "specifiers": [
+            "Path"
+          ]
+        },
+        {
+          "source": "typing",
+          "specifiers": [
+            "Any"
+          ]
+        },
+        {
+          "source": "httpx",
+          "specifiers": [
+            "httpx"
+          ]
+        }
+      ],
+      "exports": [
+        "_load_queries",
+        "_call_search",
+        "_extract_ids",
+        "main"
+      ],
+      "totalLines": 113,
+      "hasStructuralAnalysis": true
+    },
+    "tests/__init__.py": {
+      "filePath": "tests/__init__.py",
+      "contentHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 1,
+      "hasStructuralAnalysis": true
+    },
+    "tests/test_routes.py": {
+      "filePath": "tests/test_routes.py",
+      "contentHash": "d05e195da898c0cbdc0565b91b33cdab47a1d1caad3210c6b379ad1d415c03a8",
+      "functions": [
+        {
+          "name": "_build_client",
+          "params": [
+            "monkeypatch",
+            "**env_overrides"
+          ],
+          "returnType": "TestClient",
+          "exported": true,
+          "lineCount": 27
+        },
+        {
+          "name": "client",
+          "params": [
+            "monkeypatch"
+          ],
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "_make_chunks",
+          "params": [],
+          "returnType": "list[dict]",
+          "exported": true,
+          "lineCount": 52
+        },
+        {
+          "name": "test_full_lifecycle",
+          "params": [
+            "client"
+          ],
+          "exported": true,
+          "lineCount": 69
+        },
+        {
+          "name": "test_v1_contract_shape",
+          "params": [
+            "client"
+          ],
+          "exported": true,
+          "lineCount": 46
+        },
+        {
+          "name": "test_capabilities_endpoint",
+          "params": [
+            "client"
+          ],
+          "exported": true,
+          "lineCount": 12
+        },
+        {
+          "name": "test_v2_collection_flow",
+          "params": [
+            "client"
+          ],
+          "exported": true,
+          "lineCount": 77
+        },
+        {
+          "name": "test_v2_upsert_auto_embedding_when_vector_missing",
+          "params": [
+            "client",
+            "monkeypatch"
+          ],
+          "exported": true,
+          "lineCount": 29
+        },
+        {
+          "name": "test_v2_search_auto_embedding_when_query_vector_missing",
+          "params": [
+            "client",
+            "monkeypatch"
+          ],
+          "exported": true,
+          "lineCount": 41
+        },
+        {
+          "name": "test_v2_metadata_roundtrip_accepts_arbitrary_shapes",
+          "params": [
+            "client"
+          ],
+          "exported": true,
+          "lineCount": 52
+        },
+        {
+          "name": "test_v2_metadata_flattened_columns_support_where_filter",
+          "params": [
+            "client"
+          ],
+          "exported": true,
+          "lineCount": 88
+        },
+        {
+          "name": "test_v2_collection_overwrite_by_prefix",
+          "params": [
+            "client"
+          ],
+          "exported": true,
+          "lineCount": 51
+        },
+        {
+          "name": "test_disable_relations_flag",
+          "params": [
+            "monkeypatch"
+          ],
+          "exported": true,
+          "lineCount": 7
+        },
+        {
+          "name": "test_search_performance_baseline",
+          "params": [
+            "client"
+          ],
+          "exported": true,
+          "lineCount": 25
+        },
+        {
+          "name": "test_frontend_routes",
+          "params": [
+            "client"
+          ],
+          "exported": true,
+          "lineCount": 11
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "tempfile",
+          "specifiers": [
+            "tempfile"
+          ]
+        },
+        {
+          "source": "time",
+          "specifiers": [
+            "time"
+          ]
+        },
+        {
+          "source": "pytest",
+          "specifiers": [
+            "pytest"
+          ]
+        },
+        {
+          "source": "fastapi.testclient",
+          "specifiers": [
+            "TestClient"
+          ]
+        }
+      ],
+      "exports": [
+        "_build_client",
+        "client",
+        "_make_chunks",
+        "test_full_lifecycle",
+        "test_v1_contract_shape",
+        "test_capabilities_endpoint",
+        "test_v2_collection_flow",
+        "test_v2_upsert_auto_embedding_when_vector_missing",
+        "test_v2_search_auto_embedding_when_query_vector_missing",
+        "test_v2_metadata_roundtrip_accepts_arbitrary_shapes",
+        "test_v2_metadata_flattened_columns_support_where_filter",
+        "test_v2_collection_overwrite_by_prefix",
+        "test_disable_relations_flag",
+        "test_search_performance_baseline",
+        "test_frontend_routes"
+      ],
+      "totalLines": 631,
+      "hasStructuralAnalysis": true
+    }
+  }
+}
