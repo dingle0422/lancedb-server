@@ -33,6 +33,11 @@ class Settings(BaseSettings):
     gradio_use_http: bool = False
     gradio_api_base_url: str = ""
     gradio_api_key: str = ""
+    enable_server_embedding_fallback: bool = True
+    embedding_base_url: str = "http://mlp.paas.dc.servyou-it.com/qwen3-embedding/v1"
+    embedding_model: str = "qwen3-embedding"
+    embedding_api_key: str = ""
+    embedding_timeout_sec: float = 10.0
 
     model_config = SettingsConfigDict(
         env_file=".env",

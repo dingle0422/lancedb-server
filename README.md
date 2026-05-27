@@ -7,6 +7,7 @@
 - **零外部依赖部署**：纯 Python wheel（lancedb + pyarrow），单进程 uvicorn 即可启动；无需 Docker 即可裸跑。
 - **每 policy 一张表**：物理上 `STORE_DIR/{safe_policy_id}.lance/`，互不干扰；表删除等价于 `rm -rf`。
 - **服务端不依赖 jieba**：分词在客户端做（主项目 `inference/retrieval/bm25.py::tokenize`），服务端只接收已分词字符串，FTS 索引 base_tokenizer 用 `whitespace`，分词逻辑 100% 与现有 BM25 同源。
+- **API 自动 embedding 兜底（可开关）**：当 upsert 未传 `vector` 或 search 未传 `query_vector` 时，服务端会调用 OpenAI 兼容 `/embeddings` 自动补齐；失败或维度不匹配时自动降级到 BM25/FTS-only。
 - **本地 RRF 融合**：跟主项目 `inference/retrieval/rrf.py` 同公式 `1/(k+rank)`，避开 LanceDB 内置 hybrid+reranker 的版本差异。
 - **关联结构原生入索**：`kind`/`parent_chunk_index`/`derived_seq`/`relation_keys`/`hop_depth`/`source`/`clause_id` 都是表列，推理期可按高亮链路展开 / 反查；跨 policy cascade 走全局接口 `/v1/relations:lookup-dependents`。
 
@@ -17,7 +18,7 @@
 | `chunk_id` | int64 | 主键 = 原 KnowledgeChunk.index |
 | `content` | string | 给 LLM 用 |
 | `content_tokenized` | string | **客户端 jieba 分词后空格连接** |
-| `vector` | fixed_size_list&lt;float32&gt;[dim] | 客户端 embed 后送入 |
+| `vector` | fixed_size_list&lt;float32&gt;[dim] | 客户端可直接传；缺失时服务端可自动 embedding 兜底 |
 | `heading_paths` | list&lt;list&lt;string&gt;&gt; | KnowledgeChunk 元数据 |
 | `directories` | list&lt;string&gt; | KnowledgeChunk 元数据 |
 | `kind` | string | original \| derived |
@@ -105,6 +106,11 @@ http://127.0.0.1:5000/gradio-generic/   # 通用 collection/document 界面（v2
 | `ENABLE_LEGACY_RELATIONS` | `true` | 是否启用 legacy relations 路由 |
 | `ENABLE_LEGACY_UI` | `true` | 是否启用 policy 兼容 Gradio(`/gradio`) |
 | `ENABLE_GENERIC_GRADIO` | `true` | 是否启用通用 Gradio(`/gradio-generic`) |
+| `ENABLE_SERVER_EMBEDDING_FALLBACK` | `true` | 是否启用 API 自动 embedding 兜底 |
+| `EMBEDDING_BASE_URL` | `http://mlp.paas.dc.servyou-it.com/qwen3-embedding/v1` | OpenAI 兼容 embedding 服务地址 |
+| `EMBEDDING_MODEL` | `qwen3-embedding` | embedding 模型名 |
+| `EMBEDDING_API_KEY` | 空 | embedding 服务鉴权 key（可选） |
+| `EMBEDDING_TIMEOUT_SEC` | `10` | embedding 请求超时秒数 |
 | `GRADIO_USE_HTTP` | `false` | Gradio 是否通过 HTTP 调后端（否则 direct store） |
 | `GRADIO_API_BASE_URL` | 空 | Gradio HTTP 模式下的服务地址 |
 | `GRADIO_API_KEY` | 空 | Gradio HTTP 模式下鉴权 key |
@@ -123,7 +129,13 @@ docker compose up -d --build
 
 所有接口需带 `X-API-Key: <API_KEY>` 或 `Authorization: Bearer <API_KEY>` 头；当 `API_KEY` 为空时关闭鉴权（仅本地开发）。
 
-对接 v2 通用能力（collection/document/search）建议直接参考：`docs/v2_api.md`。
+对接 v2 通用能力（collection/document/search）建议直接参考：`docs/lancedb_v2_api.md`。
+
+API 自动 embedding 兜底说明：
+
+- `documents:upsert` 未传 `vector`：服务端会基于 `content` 自动生成向量
+- `search` 未传 `query_vector`：服务端会基于 `query_tokenized` 自动生成查询向量
+- 若 embedding 失败或维度不匹配：自动降级到 BM25/FTS-only（不阻断请求）
 
 | 方法 | 路径 | 用途 |
 |---|---|---|

@@ -310,6 +310,80 @@ def test_v2_collection_flow(client: TestClient):
     assert any(h["document_id"] == 102 for h in search_alias.json()["hits"])
 
 
+def test_v2_upsert_auto_embedding_when_vector_missing(client: TestClient, monkeypatch):
+    import app.store as store_mod
+
+    monkeypatch.setattr(
+        store_mod,
+        "embed_texts",
+        lambda texts: ([[0.11, 0.22, 0.33, 0.44] for _ in texts], ""),
+    )
+
+    cid = "generic_collection_auto_embed_upsert"
+    docs = [
+        {
+            "document_id": 501,
+            "content": "auto embedding for missing vector",
+            "content_tokenized": "auto embedding for missing vector",
+            "metadata": {"kind": "original"},
+        }
+    ]
+    upsert = client.post(
+        f"/v2/collections/{cid}/documents:upsert",
+        json={"documents": docs, "mode": "overwrite"},
+    )
+    assert upsert.status_code == 200, upsert.text
+    assert upsert.json()["written"] == 1
+    assert upsert.json()["dim"] == 4
+
+    meta = client.get(f"/v2/collections/{cid}/meta")
+    assert meta.status_code == 200, meta.text
+    assert meta.json()["dim"] == 4
+
+
+def test_v2_search_auto_embedding_when_query_vector_missing(client: TestClient, monkeypatch):
+    import app.store as store_mod
+
+    cid = "generic_collection_auto_embed_search"
+    docs = [
+        {
+            "document_id": 601,
+            "content": "alpha content",
+            "content_tokenized": "alpha content",
+            "vector": [0.9, 0.0, 0.0, 0.0],
+            "metadata": {"kind": "original"},
+        },
+        {
+            "document_id": 602,
+            "content": "beta content",
+            "content_tokenized": "beta content",
+            "vector": [0.0, 1.0, 0.0, 0.0],
+            "metadata": {"kind": "original"},
+        },
+    ]
+    upsert = client.post(
+        f"/v2/collections/{cid}/documents:upsert",
+        json={"documents": docs, "mode": "overwrite", "expected_dim": 4},
+    )
+    assert upsert.status_code == 200, upsert.text
+
+    monkeypatch.setattr(store_mod, "embed_query", lambda text: ([0.0, 1.0, 0.0, 0.0], ""))
+
+    search = client.post(
+        f"/v2/collections/{cid}/search",
+        json={
+            "query_tokenized": "semantic probe",
+            "query_vector": [],
+            "top_n": 5,
+            "top_m": 0,
+            "include_content": True,
+            "strategy": "legacy_hybrid",
+        },
+    )
+    assert search.status_code == 200, search.text
+    assert any(h["document_id"] == 602 for h in search.json()["hits"])
+
+
 def test_v2_metadata_roundtrip_accepts_arbitrary_shapes(client: TestClient):
     cid = "generic_collection_metadata_shape"
     docs = [

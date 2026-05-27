@@ -21,6 +21,7 @@ from typing import Any
 import pyarrow as pa
 
 from .config import get_settings
+from .embedding_fallback import embed_query, embed_texts
 from .schema import (
     ChunkRow,
     RelationKey,
@@ -564,6 +565,61 @@ def _infer_dim(rows: list[ChunkRow], expected: int | None) -> int:
     return 0
 
 
+def _auto_embed_missing_vectors(
+    policy_id: str,
+    rows: list[ChunkRow],
+    *,
+    expected_dim: int | None,
+    existing_dim: int,
+) -> None:
+    """尽力为缺失向量的行补 embedding；失败时保持原行为（后续可补零向量）。"""
+
+    missing_idx: list[int] = []
+    texts: list[str] = []
+    for idx, row in enumerate(rows):
+        if row.vector:
+            continue
+        text = (row.content or "").strip()
+        if not text:
+            continue
+        missing_idx.append(idx)
+        texts.append(text)
+
+    if not missing_idx:
+        return
+
+    vecs, err = embed_texts(texts)
+    if err:
+        logger.warning("[Store] policy=%s 自动 embedding 跳过：%s", policy_id, err)
+        return
+
+    target_dim = int(existing_dim or (expected_dim or 0))
+    if target_dim <= 0:
+        target_dim = len(vecs[0]) if vecs else 0
+
+    assigned = 0
+    for row_idx, vec in zip(missing_idx, vecs):
+        if target_dim > 0 and len(vec) != target_dim:
+            logger.warning(
+                "[Store] policy=%s 自动 embedding 维度不匹配：chunk_id=%s got=%d expect=%d",
+                policy_id,
+                rows[row_idx].chunk_id,
+                len(vec),
+                target_dim,
+            )
+            continue
+        rows[row_idx].vector = vec
+        assigned += 1
+
+    if assigned:
+        logger.info(
+            "[Store] policy=%s 自动 embedding 成功：%d/%d",
+            policy_id,
+            assigned,
+            len(missing_idx),
+        )
+
+
 def _all_rows(tbl) -> list[dict[str, Any]]:
     n = int(tbl.count_rows())
     if n <= 0:
@@ -590,8 +646,14 @@ def upsert(policy_id: str, rows: list[ChunkRow], mode: str, expected_dim: int | 
         table_names = _all_table_names(db)
         table_existed = name in table_names
 
-        incoming_dim = _infer_dim(rows, expected_dim)
         existing_dim = _existing_dim(policy_id)
+        _auto_embed_missing_vectors(
+            policy_id,
+            rows,
+            expected_dim=expected_dim,
+            existing_dim=existing_dim,
+        )
+        incoming_dim = _infer_dim(rows, expected_dim)
         if existing_dim and incoming_dim and existing_dim != incoming_dim:
             raise ValueError(
                 f"dim mismatch for policy={policy_id}: existing={existing_dim} incoming={incoming_dim}"
@@ -829,6 +891,35 @@ def hybrid_search(
     n_total = tbl.count_rows()
     if n_total == 0:
         return []
+    table_dim = _detect_dim(tbl)
+
+    final_query_vector = list(query_vector or [])
+    if not final_query_vector and top_n > 0 and table_dim > 0 and query_tokenized.strip():
+        auto_vec, err = embed_query(query_tokenized)
+        if err:
+            logger.warning("[search] policy=%s 自动 query embedding 跳过：%s", policy_id, err)
+        elif len(auto_vec) != table_dim:
+            logger.warning(
+                "[search] policy=%s 自动 query embedding 维度不匹配：got=%d expect=%d",
+                policy_id,
+                len(auto_vec),
+                table_dim,
+            )
+        else:
+            final_query_vector = auto_vec
+            logger.info(
+                "[search] policy=%s 自动 query embedding 成功（dim=%d）",
+                policy_id,
+                len(auto_vec),
+            )
+    elif final_query_vector and table_dim > 0 and len(final_query_vector) != table_dim:
+        logger.warning(
+            "[search] policy=%s query_vector 维度不匹配：got=%d expect=%d，跳过向量召回",
+            policy_id,
+            len(final_query_vector),
+            table_dim,
+        )
+        final_query_vector = []
 
     cols = _select_columns(include_content, available_columns=_table_columns(tbl))
     final_where = where
@@ -850,8 +941,8 @@ def hybrid_search(
 
     # 向量路径
     vec_pairs: list[tuple[int, float]] = []
-    if query_vector and top_n > 0:
-        q = tbl.search(query_vector, vector_column_name="vector").select(cols)
+    if final_query_vector and top_n > 0:
+        q = tbl.search(final_query_vector, vector_column_name="vector").select(cols)
         if final_where:
             q = q.where(final_where, prefilter=True)
         for row in _safe_search_to_list(q, top_n):
