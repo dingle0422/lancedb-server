@@ -137,6 +137,8 @@ class SearchRequest(BaseModel):
 class SearchHit(BaseModel):
     chunk_id: int
     score: float
+    cosine_similarity: float | None = None
+    bm25_score: float | None = None
     content: str | None = None
     heading_paths: list[list[str]] = Field(default_factory=list)
     directories: list[str] = Field(default_factory=list)

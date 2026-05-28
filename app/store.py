@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import base64
 import logging
+import math
 import os
 import threading
 import time
@@ -805,10 +806,20 @@ def _row_to_hit(row: dict, *, include_content: bool) -> SearchHit:
     except Exception:
         score = 0.0
 
+    def _to_optional_float(value: Any) -> float | None:
+        if value is None:
+            return None
+        try:
+            return float(value)
+        except Exception:
+            return None
+
     rks = row.get("relation_keys") or []
     return SearchHit(
         chunk_id=int(row["chunk_id"]),
         score=score,
+        cosine_similarity=_to_optional_float(row.get("cosine_similarity")),
+        bm25_score=_to_optional_float(row.get("bm25_score")),
         content=row.get("content") if include_content else None,
         heading_paths=[list(p) for p in (row.get("heading_paths") or [])],
         directories=list(row.get("directories") or []),
@@ -862,6 +873,26 @@ def _safe_search_to_list(query, top_k: int) -> list[dict]:
     except Exception as e:
         logger.warning("[Store] 检索失败: %s", e)
         return []
+
+
+def _calc_cosine_similarity(query_vector: list[float], candidate_vector: Any) -> float | None:
+    if not query_vector:
+        return None
+    if not isinstance(candidate_vector, list):
+        return None
+    if len(candidate_vector) != len(query_vector):
+        return None
+    try:
+        q = [float(x) for x in query_vector]
+        c = [float(x) for x in candidate_vector]
+    except Exception:
+        return None
+    q_norm = math.sqrt(sum(x * x for x in q))
+    c_norm = math.sqrt(sum(x * x for x in c))
+    if q_norm <= 0.0 or c_norm <= 0.0:
+        return None
+    dot = sum(x * y for x, y in zip(q, c))
+    return float(dot / (q_norm * c_norm))
 
 
 def hybrid_search(
@@ -921,7 +952,8 @@ def hybrid_search(
         )
         final_query_vector = []
 
-    cols = _select_columns(include_content, available_columns=_table_columns(tbl))
+    available_columns = _table_columns(tbl)
+    cols = _select_columns(include_content, available_columns=available_columns)
     final_where = where
     if not include_derived:
         cond = "kind = 'original'"
@@ -929,6 +961,7 @@ def hybrid_search(
 
     # FTS 路径
     fts_pairs: list[tuple[int, float]] = []
+    fts_scores: dict[int, float] = {}
     if query_tokenized.strip() and top_m > 0:
         q = (
             tbl.search(query_tokenized, query_type="fts", fts_columns="content_tokenized")
@@ -937,18 +970,33 @@ def hybrid_search(
         if final_where:
             q = q.where(final_where, prefilter=False)
         for row in _safe_search_to_list(q, top_m):
-            fts_pairs.append((int(row["chunk_id"]), float(row.get("_score", 0.0))))
+            cid = int(row["chunk_id"])
+            try:
+                bm25_score = float(row.get("_score", 0.0))
+            except Exception:
+                bm25_score = 0.0
+            fts_pairs.append((cid, bm25_score))
+            fts_scores[cid] = bm25_score
 
     # 向量路径
     vec_pairs: list[tuple[int, float]] = []
+    cosine_scores: dict[int, float] = {}
     if final_query_vector and top_n > 0:
-        q = tbl.search(final_query_vector, vector_column_name="vector").select(cols)
+        vec_cols = cols + ["vector"] if "vector" in available_columns else cols
+        q = tbl.search(final_query_vector, vector_column_name="vector").select(vec_cols)
         if final_where:
             q = q.where(final_where, prefilter=True)
         for row in _safe_search_to_list(q, top_n):
+            cid = int(row["chunk_id"])
             # LanceDB 向量搜索返回 _distance（越小越相似）；转成相似度分数仅用于排序展示
-            d = float(row.get("_distance", row.get("_score", 0.0)))
-            vec_pairs.append((int(row["chunk_id"]), -d))
+            try:
+                d = float(row.get("_distance", row.get("_score", 0.0)))
+            except Exception:
+                d = 0.0
+            vec_pairs.append((cid, -d))
+            cosine = _calc_cosine_similarity(final_query_vector, row.get("vector"))
+            if cosine is not None:
+                cosine_scores[cid] = cosine
 
     if not fts_pairs and not vec_pairs:
         return []
@@ -975,6 +1023,8 @@ def hybrid_search(
         if row is None:
             continue
         row["_score"] = score
+        row["cosine_similarity"] = cosine_scores.get(cid)
+        row["bm25_score"] = fts_scores.get(cid)
         hits.append(_row_to_hit(row, include_content=include_content))
     return hits
 

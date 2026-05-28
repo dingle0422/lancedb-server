@@ -105,6 +105,8 @@
 {
   "document_id": 101,
   "score": 0.016129,
+  "cosine_similarity": 0.982341,
+  "bm25_score": 2.147325,
   "content": "hybrid retrieval with rrf",
   "metadata": {
     "heading_paths": [],
@@ -119,6 +121,12 @@
   }
 }
 ```
+
+分数字段说明：
+
+- `score`：最终排序分（RRF 融合分）
+- `cosine_similarity`：向量召回线的余弦相似度；未命中向量线时为 `null`
+- `bm25_score`：BM25/FTS 召回线的原始分；未命中 BM25 线时为 `null`
 
 说明：上面的 `metadata` 字段仅为示例，不代表固定字段集合；调用方可以按业务需要扩展任意字段与嵌套结构。
 
@@ -230,6 +238,8 @@ Query 参数：
     {
       "document_id": 101,
       "score": 0.0,
+      "cosine_similarity": null,
+      "bm25_score": null,
       "content": "vector database general platform",
       "metadata": {
         "heading_paths": [],
@@ -375,6 +385,7 @@ Query 参数：
 - `include_derived=false`：会在 where 上附加 `kind='original'`
 - 需要按 metadata 过滤时，建议先调用 `GET /v2/collections/{collection_id}/meta` 获取最新 `filterable_fields` 中的 `md_*` 列名
 - `strategy`：当前仅支持 `legacy_hybrid`
+- 返回 `hits[*]` 中的 `score` 为最终 RRF 融合分；`cosine_similarity` / `bm25_score` 分别是向量线与 BM25 线的原始分（某条线未命中时为 `null`）
 
 别名接口：
 
@@ -389,6 +400,8 @@ Query 参数：
     {
       "document_id": 102,
       "score": 0.016129,
+      "cosine_similarity": 1.0,
+      "bm25_score": 1.386294,
       "content": "hybrid retrieval with rrf",
       "metadata": {
         "heading_paths": [],

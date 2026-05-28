@@ -179,6 +179,10 @@ def hit_to_generic_document(hit: SearchHit) -> GenericDocumentRecord:
     return GenericDocumentRecord(
         document_id=hit.chunk_id,
         score=float(hit.score),
+        cosine_similarity=(
+            float(hit.cosine_similarity) if hit.cosine_similarity is not None else None
+        ),
+        bm25_score=float(hit.bm25_score) if hit.bm25_score is not None else None,
         content=hit.content,
         metadata=metadata,
     )

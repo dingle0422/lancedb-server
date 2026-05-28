@@ -293,6 +293,9 @@ def test_v2_collection_flow(client: TestClient):
     )
     assert search.status_code == 200, search.text
     assert any(h["document_id"] == 102 for h in search.json()["hits"])
+    hit_102 = next(h for h in search.json()["hits"] if h["document_id"] == 102)
+    assert "cosine_similarity" in hit_102
+    assert "bm25_score" in hit_102
 
     search_alias = client.post(
         "/v2/search",
@@ -382,6 +385,63 @@ def test_v2_search_auto_embedding_when_query_vector_missing(client: TestClient, 
     )
     assert search.status_code == 200, search.text
     assert any(h["document_id"] == 602 for h in search.json()["hits"])
+
+
+def test_v2_search_returns_independent_bm25_and_cosine_scores(client: TestClient):
+    cid = "generic_collection_dual_scores"
+    docs = [
+        {
+            "document_id": 701,
+            "content": "apple banana",
+            "content_tokenized": "apple banana",
+            "vector": [1.0, 0.0, 0.0, 0.0],
+            "metadata": {"kind": "original"},
+        },
+        {
+            "document_id": 702,
+            "content": "carrot radish",
+            "content_tokenized": "carrot radish",
+            "vector": [0.0, 1.0, 0.0, 0.0],
+            "metadata": {"kind": "original"},
+        },
+    ]
+    upsert = client.post(
+        f"/v2/collections/{cid}/documents:upsert",
+        json={"documents": docs, "mode": "overwrite", "expected_dim": 4},
+    )
+    assert upsert.status_code == 200, upsert.text
+
+    pure_vec = client.post(
+        f"/v2/collections/{cid}/search",
+        json={
+            "query_tokenized": "",
+            "query_vector": [0.0, 1.0, 0.0, 0.0],
+            "top_n": 5,
+            "top_m": 0,
+            "include_content": True,
+            "strategy": "legacy_hybrid",
+        },
+    )
+    assert pure_vec.status_code == 200, pure_vec.text
+    vec_hit = next(h for h in pure_vec.json()["hits"] if h["document_id"] == 702)
+    assert vec_hit["cosine_similarity"] == pytest.approx(1.0, abs=1e-6)
+    assert vec_hit["bm25_score"] is None
+
+    bm25_only = client.post(
+        f"/v2/collections/{cid}/search",
+        json={
+            "query_tokenized": "radish",
+            "query_vector": [],
+            "top_n": 0,
+            "top_m": 5,
+            "include_content": True,
+            "strategy": "legacy_hybrid",
+        },
+    )
+    assert bm25_only.status_code == 200, bm25_only.text
+    bm25_hit = next(h for h in bm25_only.json()["hits"] if h["document_id"] == 702)
+    assert bm25_hit["bm25_score"] is not None
+    assert bm25_hit["cosine_similarity"] is None
 
 
 def test_v2_metadata_roundtrip_accepts_arbitrary_shapes(client: TestClient):

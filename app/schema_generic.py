@@ -51,6 +51,8 @@ class GenericDocumentInput(BaseModel):
 class GenericDocumentRecord(BaseModel):
     document_id: int
     score: float = 0.0
+    cosine_similarity: float | None = None
+    bm25_score: float | None = None
     content: str | None = None
     metadata: Any = Field(default_factory=dict)
 
