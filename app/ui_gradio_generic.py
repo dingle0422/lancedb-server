@@ -390,8 +390,13 @@ def build_generic_demo() -> gr.Blocks:
 
         refresh_btn.click(_refresh_collection_list, outputs=[collection_table, collection_dd])
         collection_dd.change(_load_meta, inputs=[collection_dd], outputs=[meta_md, schema_df])
-        if initial_choices:
-            demo.load(_load_meta, inputs=[collection_dd], outputs=[meta_md, schema_df])
+        # 每次用户打开/刷新页面都先拉一次最新 collection 列表，避免 build_generic_demo()
+        # 启动时焊死的快照导致后续新增 collection 在前端缺失。
+        demo.load(
+            _refresh_collection_list, outputs=[collection_table, collection_dd]
+        ).then(
+            _load_meta, inputs=[collection_dd], outputs=[meta_md, schema_df]
+        )
 
         browse_btn.click(
             _browse_documents,

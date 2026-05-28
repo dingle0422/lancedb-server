@@ -686,9 +686,13 @@ def build_demo() -> gr.Blocks:
         # 选中 dataset → 自动加载 meta
         policy_dd.change(_load_meta, inputs=[policy_dd], outputs=[meta_md, schema_df])
 
-        # 初始 meta 加载
-        if initial_choices:
-            demo.load(_load_meta, inputs=[policy_dd], outputs=[meta_md, schema_df])
+        # 每次用户打开/刷新页面都先拉一次最新 dataset 列表，避免 build_demo()
+        # 启动时焊死的快照导致后续新增 dataset 在前端缺失。
+        demo.load(
+            _refresh_dataset_list, outputs=[dataset_table, policy_dd]
+        ).then(
+            _load_meta, inputs=[policy_dd], outputs=[meta_md, schema_df]
+        )
 
         browse_btn.click(
             _browse_rows,
