@@ -149,7 +149,7 @@ async def list_documents_alias(
 async def upsert_documents(
     collection_id: str,
     body: DocumentUpsertRequest,
-    request: Request | None = None,
+    request: Request,
 ) -> DocumentUpsertResponse:
     svc = get_vector_service()
     _log_upsert_diag(request, collection_id, body)
@@ -171,7 +171,7 @@ async def upsert_documents(
 @router.post("/documents:upsert", response_model=DocumentUpsertResponse)
 async def upsert_documents_alias(
     body: DocumentUpsertRequestWithCollection,
-    request: Request | None = None,
+    request: Request,
 ) -> DocumentUpsertResponse:
     return await upsert_documents(
         collection_id=body.collection_id,
