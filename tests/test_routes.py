@@ -14,6 +14,7 @@ def _build_client(monkeypatch, **env_overrides) -> TestClient:
     monkeypatch.setenv("STORE_DIR", tmp)
     monkeypatch.setenv("API_KEY", "")  # 关闭鉴权方便测试
     monkeypatch.setenv("ENABLE_SCALAR_INDEX", "0")  # 极小表跳过标量索引省时间
+    monkeypatch.setenv("ENABLE_ASYNC_INDEXING", "0")  # 测试同步建索引，保证 upsert 后立即可检索
     monkeypatch.setenv("ENABLE_GENERIC_API", "1")
     monkeypatch.setenv("ENABLE_LEGACY_RELATIONS", "1")
     monkeypatch.setenv("ENABLE_LEGACY_UI", "1")
@@ -444,6 +445,56 @@ def test_v2_search_returns_independent_bm25_and_cosine_scores(client: TestClient
     assert bm25_hit["cosine_similarity"] is None
 
 
+def test_v2_merge_by_chunk_id_partial_patch_keeps_content_and_vector(client: TestClient):
+    cid = "generic_collection_safe_partial_merge"
+    base_doc = {
+        "document_id": 801,
+        "content": "preserve original content",
+        "content_tokenized": "preserve original content",
+        "vector": [0.0, 0.0, 1.0, 0.0],
+        "metadata": {"kind": "original", "attempts": 1},
+    }
+    upsert = client.post(
+        f"/v2/collections/{cid}/documents:upsert",
+        json={"documents": [base_doc], "mode": "overwrite", "expected_dim": 4},
+    )
+    assert upsert.status_code == 200, upsert.text
+
+    patch_doc = {
+        "document_id": 801,
+        "content": "",
+        "content_tokenized": "",
+        "vector": [],
+        "metadata": {"attempts": 2, "tombstone": True},
+    }
+    patch_resp = client.post(
+        f"/v2/collections/{cid}/documents:upsert",
+        json={"documents": [patch_doc], "mode": "merge_by_chunk_id", "expected_dim": 4},
+    )
+    assert patch_resp.status_code == 200, patch_resp.text
+
+    docs_resp = client.get(f"/v2/collections/{cid}/documents", params={"include_content": "true"})
+    assert docs_resp.status_code == 200, docs_resp.text
+    row = next(d for d in docs_resp.json()["documents"] if d["document_id"] == 801)
+    assert row["content"] == base_doc["content"]
+    assert row["metadata"]["attempts"] == 2
+    assert row["metadata"]["tombstone"] is True
+
+    vec_search = client.post(
+        f"/v2/collections/{cid}/search",
+        json={
+            "query_tokenized": "",
+            "query_vector": [0.0, 0.0, 1.0, 0.0],
+            "top_n": 5,
+            "top_m": 0,
+            "include_content": True,
+            "strategy": "legacy_hybrid",
+        },
+    )
+    assert vec_search.status_code == 200, vec_search.text
+    assert any(h["document_id"] == 801 for h in vec_search.json()["hits"])
+
+
 def test_v2_metadata_roundtrip_accepts_arbitrary_shapes(client: TestClient):
     cid = "generic_collection_metadata_shape"
     docs = [
@@ -675,6 +726,119 @@ def test_search_performance_baseline(client: TestClient):
 
     p95_like = sorted(elapsed)[int(len(elapsed) * 0.95) - 1]
     assert p95_like < 2.0
+
+
+def test_async_indexing_eventually_builds_fts(monkeypatch):
+    """开启异步建索引：upsert 立即返回，后台最终把 FTS 索引建好且检索可命中。"""
+
+    with _build_client(monkeypatch, ENABLE_ASYNC_INDEXING=1) as c:
+        pid = "async_idx_pid"
+        resp = c.post(
+            f"/v1/policies/{pid}/chunks:upsert",
+            json={"chunks": _make_chunks(), "mode": "overwrite", "expected_dim": 4},
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["written"] == 3
+
+        # 后台线程建索引：轮询 meta 等到 FTS 就绪（最多 ~5s）。
+        has_fts = False
+        for _ in range(50):
+            meta = c.get(f"/v1/policies/{pid}/meta").json()
+            if meta.get("has_fts_index"):
+                has_fts = True
+                break
+            time.sleep(0.1)
+        assert has_fts, "后台建索引未在预期时间内完成"
+
+        search = c.post(
+            f"/v1/policies/{pid}/search",
+            json={
+                "query_tokenized": "萝卜",
+                "query_vector": [0.0, 1.0, 0.0, 0.0],
+                "top_n": 5,
+                "top_m": 5,
+                "include_content": True,
+            },
+        )
+        assert search.status_code == 200, search.text
+        assert any(h["chunk_id"] == 2 for h in search.json()["hits"])
+
+
+def test_append_is_idempotent(client: TestClient):
+    """append 模式按 chunk_id 幂等：同一文档重复 upsert 不产生重复行，且内容被更新。"""
+
+    cid = "idem_collection"
+
+    def _upsert(content: str) -> dict:
+        resp = client.post(
+            f"/v2/collections/{cid}/documents:upsert",
+            json={
+                "documents": [
+                    {
+                        "document_id": 7,
+                        "content": content,
+                        "content_tokenized": content,
+                        "vector": [0.1, 0.2, 0.3, 0.4],
+                        "metadata": {"kind": "original"},
+                    }
+                ],
+                "mode": "append",
+                "expected_dim": 4,
+            },
+        )
+        assert resp.status_code == 200, resp.text
+        return resp.json()
+
+    first = _upsert("第一版内容")
+    assert first["written"] == 1
+    assert first["table_size"] == 1
+
+    # 模拟客户端超时重试：同一 document_id 再发两次
+    second = _upsert("第二版内容")
+    third = _upsert("第二版内容")
+    # 关键断言：表里始终只有 1 行，没有因重试而重复
+    assert second["table_size"] == 1
+    assert third["table_size"] == 1
+
+    docs = client.get(
+        f"/v2/collections/{cid}/documents",
+        params={"include_content": "true"},
+    )
+    assert docs.status_code == 200, docs.text
+    body = docs.json()["documents"]
+    assert len(body) == 1
+    assert body[0]["document_id"] == 7
+    assert body[0]["content"] == "第二版内容"  # 内容被更新为最新版
+
+
+def test_upsert_dedupes_within_request(client: TestClient):
+    """同一请求内出现重复 chunk_id 时去重，保留最后一条。"""
+
+    pid = "dedupe_pid"
+    dup_chunk = {
+        "chunk_id": 1,
+        "content": "旧",
+        "content_tokenized": "旧",
+        "vector": [1.0, 0.0, 0.0, 0.0],
+        "kind": "original",
+        "parent_chunk_index": -1,
+        "derived_seq": 0,
+        "relation_keys": [],
+        "hop_depth": 0,
+        "source": "",
+        "clause_id": "",
+        "built_at": 1700000000000,
+    }
+    dup_chunk_new = {**dup_chunk, "content": "新", "content_tokenized": "新"}
+
+    resp = client.post(
+        f"/v1/policies/{pid}/chunks:upsert",
+        json={"chunks": [dup_chunk, dup_chunk_new], "mode": "overwrite", "expected_dim": 4},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["written"] == 1
+    assert body["table_size"] == 1
 
 
 def test_frontend_routes(client: TestClient):

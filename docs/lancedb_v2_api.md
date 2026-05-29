@@ -287,7 +287,8 @@ Query 参数：
 
 - `overwrite`：覆盖写
 - `append`：追加写
-- `merge_by_chunk_id`：按主键（`document_id/chunk_id`）合并
+- `merge_by_chunk_id`：按主键（`document_id/chunk_id`）合并；对已存在文档执行字段级安全合并，
+  空 `content`/`content_tokenized`/`vector` 不会覆盖旧值，适合 `attempts`、`tombstone` 这类局部 metadata 更新
 
 别名接口：
 

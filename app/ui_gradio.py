@@ -247,6 +247,20 @@ def _embed_query(text: str) -> tuple[list[float], str]:
 
 _BARS = "▁▂▃▄▅▆▇█"
 _PREVIEW_MAX = 64  # vector 预览最多采样多少维度
+_BROWSE_HEADERS = [
+    "chunk_id",
+    "kind",
+    "parent",
+    "derived_seq",
+    "source",
+    "clause_id",
+    "hop",
+    "heading_paths",
+    "directories",
+    "relation_keys",
+    "content",
+    "vector",
+]
 
 
 def _vector_sparkline(vec: list[float] | None) -> str:
@@ -350,7 +364,7 @@ def _browse_rows(
     """
 
     if not policy_id:
-        return gr.update(value=[], headers=[]), "未选择 dataset", ""
+        return gr.update(value=[]), "未选择 dataset", ""
 
     page = max(1, int(page or 1))
     page_size = max(1, min(int(page_size or 50), 1000))
@@ -364,29 +378,12 @@ def _browse_rows(
             include_content=include_content,
         )
     except Exception as e:  # noqa: BLE001
-        return gr.update(value=[], headers=[]), f"❌ 查询失败: {e}", ""
+        return gr.update(value=[]), f"❌ 查询失败: {e}", ""
 
     if not rows_raw:
-        return gr.update(value=[], headers=[]), "无数据", "[]"
+        return gr.update(value=[]), "无数据", "[]"
 
     page_rows = rows_raw[offset: offset + page_size]
-
-    headers = [
-        "chunk_id",
-        "kind",
-        "parent",
-        "derived_seq",
-        "source",
-        "clause_id",
-        "hop",
-        "heading_paths",
-        "directories",
-        "relation_keys",
-    ]
-    if include_content:
-        headers.append("content")
-    if show_vector:
-        headers.append("vector")
 
     def _stringify(v: Any) -> str:
         if v is None:
@@ -409,11 +406,9 @@ def _browse_rows(
             _stringify(r.get("directories")),
             _stringify(r.get("relation_keys")),
         ]
-        if include_content:
-            row.append(_stringify(r.get("content")))
-        if show_vector:
-            # HTTP 模式下默认列表接口不返回 vector，这里会展示为空字符串。
-            row.append(_vector_sparkline(r.get("vector")))
+        row.append(_stringify(r.get("content")) if include_content else "")
+        # HTTP 模式下默认列表接口不返回 vector，这里可能为空字符串。
+        row.append(_vector_sparkline(r.get("vector")) if show_vector else "")
         table.append(row)
 
     # 完整原始字典（含 vector 全量）丢给 gr.Code 复制
@@ -425,7 +420,7 @@ def _browse_rows(
     )
     if _GRADIO_HTTP_MODE and show_vector:
         info += " · HTTP 模式下 vector 预览可能为空"
-    return gr.update(value=table, headers=headers), info, raw_json
+    return gr.update(value=table), info, raw_json
 
 
 # ---------------------------------------------------------------- search
@@ -608,6 +603,7 @@ def build_demo() -> gr.Blocks:
                         browse_info = gr.Markdown("")
                         gr.Markdown("**表格区**：长文本不截断，鼠标点击单元格即可拖选复制。")
                         browse_df = gr.Dataframe(
+                            headers=_BROWSE_HEADERS,
                             value=[],
                             interactive=False,
                             wrap=True,

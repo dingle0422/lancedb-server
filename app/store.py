@@ -11,12 +11,15 @@ LanceDB 操作大多是同步阻塞的；外层路由用 :func:`anyio.to_thread.
 
 from __future__ import annotations
 
+import atexit
 import base64
+import json
 import logging
 import math
 import os
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 import pyarrow as pa
@@ -51,6 +54,60 @@ def _get_write_lock(policy_id: str) -> threading.Lock:
         if policy_id not in _write_locks:
             _write_locks[policy_id] = threading.Lock()
         return _write_locks[policy_id]
+
+
+# ---------------------------------------------------------------- 后台索引
+#
+# 建索引（FTS / 向量 / 标量）相对耗时，且放在 upsert 同步路径里会拉高响应时延，
+# 容易触发客户端 read timeout。这里用单后台线程串行处理建索引任务，并按 policy_id
+# 去重合并：同一张表只保留「最多一个排队 + 一个运行中」，避免任务堆积。
+_index_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="idx")
+_pending_index: set[str] = set()
+_pending_index_lock = threading.Lock()
+
+
+def _run_indexing_job(policy_id: str) -> None:
+    # 任务开始即清除 pending 标记：运行期间到来的新 upsert 可再次排队，
+    # 保证新写入的数据最终也会被索引。
+    with _pending_index_lock:
+        _pending_index.discard(policy_id)
+    try:
+        write_lock = _get_write_lock(policy_id)
+        with write_lock:
+            with _table_lock:
+                tbl = _table_cache.get(policy_id)
+            if tbl is None:
+                if not table_exists(policy_id):
+                    return
+                tbl = open_table(policy_id)
+            ensure_indexes(tbl)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[Store] 后台建索引 policy=%s 失败（忽略）: %s", policy_id, e)
+
+
+def _schedule_indexing(policy_id: str) -> None:
+    """登记一次后台建索引；同一 policy 已在排队则合并，不重复提交。"""
+
+    with _pending_index_lock:
+        if policy_id in _pending_index:
+            return
+        _pending_index.add(policy_id)
+    try:
+        _index_executor.submit(_run_indexing_job, policy_id)
+    except RuntimeError:
+        # 线程池已关闭（进程退出阶段）：退化为同步执行，保证索引不丢。
+        with _pending_index_lock:
+            _pending_index.discard(policy_id)
+        _run_indexing_job(policy_id)
+
+
+@atexit.register
+def _shutdown_index_executor() -> None:
+    # 进程退出前尽量等已排队的建索引任务跑完，避免索引缺失。
+    try:
+        _index_executor.shutdown(wait=True)
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _evict_and_release(policy_id: str) -> None:
@@ -445,6 +502,123 @@ def _normalize_row_for_schema(row: dict[str, Any], schema: pa.Schema, dim: int) 
     return out
 
 
+def _is_partial_metadata_patch_row(row: dict[str, Any]) -> bool:
+    """判断是否是仅更新 metadata 的补丁行（常见于 tombstone / attempts 递增）。"""
+
+    def _as_int(value: Any, default: int) -> int:
+        try:
+            if value is None:
+                return default
+            return int(value)
+        except Exception:
+            return default
+
+    return (
+        not str(row.get("content", "") or "").strip()
+        and not str(row.get("content_tokenized", "") or "").strip()
+        and not list(row.get("vector") or [])
+        and not (row.get("heading_paths") or [])
+        and not (row.get("directories") or [])
+        and str(row.get("kind", "original") or "original").lower() == "original"
+        and _as_int(row.get("parent_chunk_index"), -1) == -1
+        and _as_int(row.get("derived_seq"), 0) == 0
+        and not (row.get("relation_keys") or [])
+        and _as_int(row.get("hop_depth"), 0) == 0
+        and not str(row.get("source", "") or "").strip()
+        and not str(row.get("clause_id", "") or "").strip()
+    )
+
+
+def _merge_metadata_json(existing: Any, incoming: Any) -> str:
+    """metadata_json 做浅层 merge，避免补丁写入把旧 metadata 整体抹掉。"""
+
+    existing_str = existing if isinstance(existing, str) else "{}"
+    incoming_str = incoming if isinstance(incoming, str) else "{}"
+    if not incoming_str.strip() or incoming_str.strip() == "{}":
+        return existing_str if existing_str.strip() else "{}"
+
+    try:
+        incoming_obj = json.loads(incoming_str)
+    except Exception:
+        return incoming_str
+    if not isinstance(incoming_obj, dict):
+        return incoming_str
+
+    try:
+        existing_obj = json.loads(existing_str) if existing_str.strip() else {}
+    except Exception:
+        existing_obj = {}
+    if not isinstance(existing_obj, dict):
+        return incoming_str
+
+    merged = dict(existing_obj)
+    merged.update(incoming_obj)
+    return json.dumps(merged, ensure_ascii=False)
+
+
+def _merge_by_chunk_id_safe(
+    *,
+    existing_row: dict[str, Any] | None,
+    incoming_row: dict[str, Any],
+    schema: pa.Schema,
+    dim: int,
+) -> dict[str, Any]:
+    """按字段安全合并：空 content/vector 不覆盖已存在值。"""
+
+    if existing_row is None:
+        return _normalize_row_for_schema(incoming_row, schema, dim)
+
+    out = dict(existing_row)
+    partial_patch = _is_partial_metadata_patch_row(incoming_row)
+    preserve_on_partial_patch = {
+        "heading_paths",
+        "directories",
+        "kind",
+        "parent_chunk_index",
+        "derived_seq",
+        "relation_keys",
+        "hop_depth",
+        "source",
+        "clause_id",
+        "built_at",
+    }
+
+    for field in schema:
+        name = field.name
+        if name == "chunk_id":
+            out[name] = int(incoming_row.get("chunk_id", existing_row.get("chunk_id", 0)))
+            continue
+
+        if name == "vector":
+            incoming_vec = list(incoming_row.get(name) or [])
+            if incoming_vec:
+                out[name] = incoming_vec
+            continue
+
+        if name in ("content", "content_tokenized"):
+            incoming_text = str(incoming_row.get(name, "") or "")
+            if incoming_text.strip():
+                out[name] = incoming_text
+            continue
+
+        if name == "metadata_json":
+            out[name] = _merge_metadata_json(existing_row.get(name), incoming_row.get(name))
+            continue
+
+        if name.startswith("md_"):
+            if name in incoming_row:
+                out[name] = incoming_row.get(name)
+            continue
+
+        if partial_patch and name in preserve_on_partial_patch:
+            continue
+
+        if name in incoming_row:
+            out[name] = incoming_row.get(name)
+
+    return _normalize_row_for_schema(out, schema, dim)
+
+
 def _build_record_batch(
     rows: list[ChunkRow],
     dim: int,
@@ -545,6 +719,9 @@ def ensure_indexes(tbl) -> dict[str, bool]:
         except Exception:
             scalar_cols = ["kind", "parent_chunk_index"]
         for col in scalar_cols:
+            # 仅在缺失时构建，避免每次 upsert 都全量重建标量索引（与 FTS / 向量索引一致）。
+            if _has_index_on(tbl, col):
+                continue
             try:
                 tbl.create_scalar_index(col, replace=True)
             except Exception as e:
@@ -564,6 +741,20 @@ def _infer_dim(rows: list[ChunkRow], expected: int | None) -> int:
         if r.vector:
             return len(r.vector)
     return 0
+
+
+def _dedupe_rows_by_chunk_id(rows: list[ChunkRow]) -> list[ChunkRow]:
+    """同一请求内按 chunk_id 去重，保留最后一条。
+
+    既保证写入幂等，也避免 ``merge_insert`` 因源批次出现重复键而报错。
+    """
+
+    by_id: dict[int, ChunkRow] = {}
+    for r in rows:
+        by_id[int(r.chunk_id)] = r
+    if len(by_id) == len(rows):
+        return rows
+    return list(by_id.values())
 
 
 def _auto_embed_missing_vectors(
@@ -639,6 +830,12 @@ def upsert(policy_id: str, rows: list[ChunkRow], mode: str, expected_dim: int | 
 
     if not rows:
         return {"written": 0, "table_size": _row_count(policy_id), "dim": _existing_dim(policy_id)}
+
+    # 幂等化：1) 同一请求内按 chunk_id 去重；2) append 默认走 chunk_id upsert（同 id 更新、新 id 插入），
+    # 这样客户端重试 / 重复发送同一文档不会产生重复行。可通过 IDEMPOTENT_APPEND=0 退回旧追加语义。
+    rows = _dedupe_rows_by_chunk_id(rows)
+    if mode == "append" and get_settings().idempotent_append:
+        mode = "merge_by_chunk_id"
 
     write_lock = _get_write_lock(policy_id)
     with write_lock:
@@ -733,8 +930,14 @@ def upsert(policy_id: str, rows: list[ChunkRow], mode: str, expected_dim: int | 
                         int(r.get("chunk_id", 0)): _normalize_row_for_schema(r, target_schema, dim)
                         for r in existing_rows
                     }
-                    for row in normalized_incoming:
-                        by_id[int(row.get("chunk_id", 0))] = row
+                    for row in incoming_dict_rows:
+                        cid = int(row.get("chunk_id", 0))
+                        by_id[cid] = _merge_by_chunk_id_safe(
+                            existing_row=by_id.get(cid),
+                            incoming_row=row,
+                            schema=target_schema,
+                            dim=dim,
+                        )
                     merged_rows = list(by_id.values())
                 batch = _build_batch_from_raw_rows(merged_rows, target_schema, dim)
                 tbl = _overwrite_or_create(db, policy_id, name, batch, dim, existing_dim)
@@ -748,29 +951,41 @@ def upsert(policy_id: str, rows: list[ChunkRow], mode: str, expected_dim: int | 
                 if mode == "append":
                     tbl.add(batch)
                 else:
-                    try:
-                        (
-                            tbl.merge_insert("chunk_id")
-                            .when_matched_update_all()
-                            .when_not_matched_insert_all()
-                            .execute(batch)
+                    target_schema = existing_schema or tbl.schema
+                    existing_rows = _all_rows(tbl)
+                    by_id: dict[int, dict[str, Any]] = {
+                        int(r.get("chunk_id", 0)): _normalize_row_for_schema(r, target_schema, dim)
+                        for r in existing_rows
+                    }
+                    for row in incoming_dict_rows:
+                        cid = int(row.get("chunk_id", 0))
+                        by_id[cid] = _merge_by_chunk_id_safe(
+                            existing_row=by_id.get(cid),
+                            incoming_row=row,
+                            schema=target_schema,
+                            dim=dim,
                         )
-                    except Exception as e:
-                        # LanceDB 老版本可能不支持 merge_insert，退化为 delete + add
-                        logger.info("[Store] merge_insert 不可用，退化为 delete+add: %s", e)
-                        ids = [str(r.chunk_id) for r in rows]
-                        tbl.delete(f"chunk_id IN ({','.join(ids)})")
-                        tbl.add(batch)
+                    merged_rows = list(by_id.values())
+                    merged_batch = _build_batch_from_raw_rows(merged_rows, target_schema, dim)
+                    tbl = _overwrite_or_create(db, policy_id, name, merged_batch, dim, existing_dim)
 
         with _table_lock:
             _table_cache[policy_id] = tbl
 
-        ensure_indexes(tbl)
-        return {
-            "written": len(rows),
-            "table_size": int(tbl.count_rows()),
-            "dim": int(dim),
-        }
+        table_size = int(tbl.count_rows())
+
+    # 建索引相对耗时：默认放到后台异步执行，让 upsert 写完即返回，避免客户端 read timeout。
+    if get_settings().enable_async_indexing:
+        _schedule_indexing(policy_id)
+    else:
+        with write_lock:
+            ensure_indexes(tbl)
+
+    return {
+        "written": len(rows),
+        "table_size": table_size,
+        "dim": int(dim),
+    }
 
 
 # ---------------------------------------------------------------- 读取助手

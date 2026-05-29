@@ -22,6 +22,7 @@ _SVC = get_vector_service()
 _TOKEN_SPLIT_RE = re.compile(r"[\s\W_]+")
 _BARS = "▁▂▃▄▅▆▇█"
 _PREVIEW_MAX = 64
+_BROWSE_HEADERS = ["document_id", "score", "content", "metadata", "vector_preview"]
 
 _DEFAULT_EMBEDDING_BASE_URL = "http://mlp.paas.dc.servyou-it.com/qwen3-embedding/v1"
 _DEFAULT_EMBEDDING_MODEL = "qwen3-embedding"
@@ -137,7 +138,7 @@ def _browse_documents(
     show_vector: bool,
 ):
     if not collection_id:
-        return gr.update(value=[], headers=[]), "未选择 collection", ""
+        return gr.update(value=[]), "未选择 collection", ""
 
     page = max(1, int(page or 1))
     page_size = max(1, min(int(page_size or 50), 1000))
@@ -151,27 +152,24 @@ def _browse_documents(
             include_content=include_content,
         )
     except Exception as e:  # noqa: BLE001
-        return gr.update(value=[], headers=[]), f"❌ 查询失败: {e}", ""
+        return gr.update(value=[]), f"❌ 查询失败: {e}", ""
 
     if not docs:
-        return gr.update(value=[], headers=[]), "无数据", "[]"
+        return gr.update(value=[]), "无数据", "[]"
 
     page_docs = docs[offset: offset + page_size]
     raw_docs = [_dump(d) for d in page_docs]
 
-    headers = ["document_id", "score"]
-    if include_content:
-        headers.append("content")
-    headers.extend(["metadata", "vector_preview"])
-
     table = []
     for item in raw_docs:
         metadata = item.get("metadata", {}) or {}
-        row = [item.get("document_id"), float(item.get("score", 0.0))]
-        if include_content:
-            row.append(item.get("content") or "")
-        row.append(json.dumps(metadata, ensure_ascii=False))
-        row.append(_vector_sparkline(metadata.get("vector") if show_vector else []))
+        row = [
+            item.get("document_id"),
+            float(item.get("score", 0.0)),
+            (item.get("content") or "") if include_content else "",
+            json.dumps(metadata, ensure_ascii=False),
+            _vector_sparkline(metadata.get("vector") if show_vector else []),
+        ]
         table.append(row)
 
     info = (
@@ -179,7 +177,7 @@ def _browse_documents(
         + (f" · where: `{where.strip()}`" if where.strip() else "")
     )
     raw_json = json.dumps(raw_docs, ensure_ascii=False, indent=2, default=str)
-    return gr.update(value=table, headers=headers), info, raw_json
+    return gr.update(value=table), info, raw_json
 
 
 def _search_documents(
@@ -332,6 +330,7 @@ def build_generic_demo() -> gr.Blocks:
                             browse_btn = gr.Button("🔍 浏览", variant="primary")
                         browse_info = gr.Markdown("")
                         browse_df = gr.Dataframe(
+                            headers=_BROWSE_HEADERS,
                             value=[],
                             interactive=False,
                             wrap=True,
