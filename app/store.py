@@ -1250,6 +1250,7 @@ def list_chunks(
     where: str | None,
     limit: int,
     include_content: bool,
+    offset: int = 0,
 ) -> list[SearchHit]:
     if not table_exists(policy_id):
         return []
@@ -1258,7 +1259,10 @@ def list_chunks(
     q = tbl.search().select(cols)
     if where:
         q = q.where(where)
-    rows = q.limit(max(limit, 1)).to_list()
+    q = q.limit(max(limit, 1))
+    if offset and offset > 0:
+        q = q.offset(int(offset))
+    rows = q.to_list()
     return [_row_to_hit(r, include_content=include_content) for r in rows]
 
 

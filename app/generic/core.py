@@ -133,6 +133,7 @@ class DocumentStore:
         where: str | None,
         limit: int,
         include_content: bool,
+        offset: int = 0,
     ) -> list[GenericDocumentRecord]:
         policy_id = collection_to_policy(collection_id)
         hits = store.list_chunks(
@@ -140,6 +141,7 @@ class DocumentStore:
             where=where,
             limit=limit,
             include_content=include_content,
+            offset=offset,
         )
         return [hit_to_generic_document(h) for h in hits]
 

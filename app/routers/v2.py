@@ -113,6 +113,7 @@ async def list_documents(
     collection_id: str,
     where: str | None = Query(default=None),
     limit: int = Query(default=1000, ge=1, le=100000),
+    offset: int = Query(default=0, ge=0),
     include_content: bool = Query(default=False),
 ) -> DocumentListResponse:
     svc = get_vector_service()
@@ -122,6 +123,7 @@ async def list_documents(
         where=where,
         limit=limit,
         include_content=include_content,
+        offset=offset,
     )
     docs = await anyio.to_thread.run_sync(fn)
     return DocumentListResponse(documents=docs)
@@ -132,12 +134,14 @@ async def list_documents_alias(
     collection_id: str = Query(...),
     where: str | None = Query(default=None),
     limit: int = Query(default=1000, ge=1, le=100000),
+    offset: int = Query(default=0, ge=0),
     include_content: bool = Query(default=False),
 ) -> DocumentListResponse:
     return await list_documents(
         collection_id=collection_id,
         where=where,
         limit=limit,
+        offset=offset,
         include_content=include_content,
     )
 

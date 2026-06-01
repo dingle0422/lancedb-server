@@ -223,12 +223,30 @@
 Query 参数：
 
 - `where`：过滤表达式（LanceDB where 语法）；可使用基础字段（如 `kind`）和扁平化后的 `md_*` 字段
-- `limit`：默认 `1000`，范围 `1..100000`
+- `limit`：单页返回条数，默认 `1000`，范围 `1..100000`
+- `offset`：跳过的条数（用于分页），默认 `0`，范围 `>= 0`
 - `include_content`：默认 `false`
 
 别名接口：
 
 - `GET /v2/documents?collection_id=...`
+
+分页说明：
+
+- 接口本身不返回总数，按 `limit + offset` 方式翻页：第 N 页（页码从 0 起）传 `offset = N * limit`。
+- 当某次返回的 `documents` 数量 **小于 `limit`** 时，说明已到最后一页，停止翻页。
+- 需要拉取 collection 全量文档时，循环调用直到满足上述停止条件即可；不要依赖单次大 `limit` 一把梭，量大时会有内存与超时风险。
+- 集合的文档总数可通过 `GET /v2/collections/{collection_id}/meta` 的 `n_documents` 字段获取，便于客户端预估页数。
+
+分页调用示例（拉取全量）：
+
+```text
+# page_size = 1000
+GET /v2/collections/{cid}/documents?include_content=false&limit=1000&offset=0
+GET /v2/collections/{cid}/documents?include_content=false&limit=1000&offset=1000
+GET /v2/collections/{cid}/documents?include_content=false&limit=1000&offset=2000
+... 直到返回数量 < 1000 为止
+```
 
 响应：
 
