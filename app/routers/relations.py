@@ -79,3 +79,14 @@ async def lookup_dependents(
     return DependentsResponse(
         dependents=[DependentEntry(source_policy_id=pid, n_hits=n) for pid, n in raw]
     )
+
+
+@router.post("/v1/relations:reindex")
+async def reindex_relations() -> dict:
+    """全量重建 relation 反向索引（运维 / 预热用）。
+
+    平时无需调用：upsert 会增量维护、lookup_dependents 也会后台补建。仅在初次启用、
+    手动改动数据或怀疑索引漂移时用它一次性重建。
+    """
+    result = await anyio.to_thread.run_sync(store.rebuild_relation_index)
+    return {"ok": True, **result}

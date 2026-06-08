@@ -111,9 +111,25 @@ http://127.0.0.1:5000/gradio-generic/   # 通用 collection/document 界面（v2
 | `EMBEDDING_MODEL` | `qwen3-embedding` | embedding 模型名 |
 | `EMBEDDING_API_KEY` | 空 | embedding 服务鉴权 key（可选） |
 | `EMBEDDING_TIMEOUT_SEC` | `10` | embedding 请求超时秒数 |
+| `ENABLE_RELATION_INDEX` | `true` | 是否启用 relation 反向索引（SQLite），把 `lookup-dependents` 降为点查；`0` 退回全表扫描 |
+| `LOOKUP_DEPENDENTS_MAX_WORKERS` | `8` | `lookup-dependents` 扫描兜底路径的并行线程上限；`1` 表示串行（仅在索引关闭/未覆盖时生效） |
 | `GRADIO_USE_HTTP` | `false` | Gradio 是否通过 HTTP 调后端（否则 direct store） |
 | `GRADIO_API_BASE_URL` | 空 | Gradio HTTP 模式下的服务地址 |
 | `GRADIO_API_KEY` | 空 | Gradio HTTP 模式下鉴权 key |
+
+### lookup-dependents 性能与反向索引
+
+`/v1/relations:lookup-dependents` 供主项目 cascade 触发器反查“哪些 source policy 引用了某 target”。早期实现为全库扫描，policy 多时可能耗时数十秒。现按两层优化：
+
+- **反向索引（默认开启，`ENABLE_RELATION_INDEX=1`）**：用一张 SQLite 表（`STORE_DIR/_relation_index.sqlite3`）维护 `target -> 依赖它的 source` 映射，`upsert` 成功后按 source 粒度增量更新、`drop` 时清除，查询变为点查。首次启用或迁移历史数据时索引尚未覆盖全部 source，本次请求会回退全表扫描并在后台自动补建，逐步收敛；也可手动预热：
+
+```bash
+curl -X POST -H "X-API-Key: <API_KEY>" "<BASE_URL>/v1/relations:reindex"
+```
+
+- **扫描兜底（`ENABLE_RELATION_INDEX=0` 或索引未覆盖时）**：按 `LOOKUP_DEPENDENTS_MAX_WORKERS` 并行扫描各源表。调参建议先 `4~8` 灰度，观测延迟与 I/O 负载后再上调；出现磁盘抖动或其他接口尾延迟升高时回调或设为 `1` 串行。
+
+> 反向索引是可重建的派生数据：任何异常都不影响主流程，store 层会自动回退扫描；怀疑漂移时用 `:reindex` 一键重建。
 
 ### Docker
 
@@ -148,6 +164,7 @@ API 自动 embedding 兜底说明：
 | POST | `/v1/policies/{policy_id}/relations:expand` | 取某父 chunk 的派生 chunks |
 | GET | `/v1/policies/{policy_id}/relations:lookup` | 单 policy 内反查依赖某 (target_policy_id, target_clause_id) 的 chunks |
 | GET | `/v1/relations:lookup-dependents` | 全局反查：哪些源 policy 引用了 target |
+| POST | `/v1/relations:reindex` | 全量重建 relation 反向索引（运维 / 预热用） |
 | GET | `/v1/policies` | 列出所有 policy |
 | GET | `/v1/policies/{policy_id}/meta` | 表行数 / dim / 索引状态 |
 | GET | `/v2/capabilities` | 通用 API 能力协商 |

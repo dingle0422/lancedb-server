@@ -852,3 +852,123 @@ def test_frontend_routes(client: TestClient):
     # 新增 generic gradio
     generic = client.get("/gradio-generic")
     assert generic.status_code in (200, 307)
+
+
+def _deps_map(resp) -> dict[str, int]:
+    assert resp.status_code == 200, resp.text
+    return {d["source_policy_id"]: d["n_hits"] for d in resp.json()["dependents"]}
+
+
+def test_lookup_dependents_reverse_index(client: TestClient):
+    """反向索引点查：target-only / clause-specific / 不存在的 clause 都要正确。"""
+
+    pid = "src_pol_idx"
+    client.post(
+        f"/v1/policies/{pid}/chunks:upsert",
+        json={"chunks": _make_chunks(), "mode": "overwrite", "expected_dim": 4},
+    )
+
+    # chunk2 -> OTHER_POL/C-001, chunk3 -> OTHER_POL/C-002：任意 clause 命中 2 行
+    any_deps = _deps_map(
+        client.get("/v1/relations:lookup-dependents", params={"target_policy_id": "OTHER_POL"})
+    )
+    assert any_deps.get(pid) == 2
+
+    c1 = _deps_map(
+        client.get(
+            "/v1/relations:lookup-dependents",
+            params={"target_policy_id": "OTHER_POL", "target_clause_id": "C-001"},
+        )
+    )
+    assert c1.get(pid) == 1
+
+    c2 = _deps_map(
+        client.get(
+            "/v1/relations:lookup-dependents",
+            params={"target_policy_id": "OTHER_POL", "target_clause_id": "C-002"},
+        )
+    )
+    assert c2.get(pid) == 1
+
+    nope = _deps_map(
+        client.get(
+            "/v1/relations:lookup-dependents",
+            params={"target_policy_id": "OTHER_POL", "target_clause_id": "NOPE"},
+        )
+    )
+    assert nope == {}
+
+    # 自反不计：以 source 自身为 target 应为空
+    self_ref = _deps_map(
+        client.get("/v1/relations:lookup-dependents", params={"target_policy_id": pid})
+    )
+    assert pid not in self_ref
+
+
+def test_lookup_dependents_index_matches_scan(monkeypatch):
+    """索引路径与全表扫描兜底路径结果一致。"""
+
+    def _collect(client: TestClient, pid: str) -> dict[str, int]:
+        client.post(
+            f"/v1/policies/{pid}/chunks:upsert",
+            json={"chunks": _make_chunks(), "mode": "overwrite", "expected_dim": 4},
+        )
+        out = {}
+        for clause in (None, "C-001", "C-002", "NOPE"):
+            params = {"target_policy_id": "OTHER_POL"}
+            if clause is not None:
+                params["target_clause_id"] = clause
+            out[str(clause)] = _deps_map(
+                client.get("/v1/relations:lookup-dependents", params=params)
+            ).get(pid, 0)
+        return out
+
+    with _build_client(monkeypatch, ENABLE_RELATION_INDEX=1) as c:
+        indexed = _collect(c, "p_idx")
+    with _build_client(monkeypatch, ENABLE_RELATION_INDEX=0) as c:
+        scanned = _collect(c, "p_idx")
+
+    assert indexed == scanned
+    assert indexed == {"None": 2, "C-001": 1, "C-002": 1, "NOPE": 0}
+
+
+def test_drop_removes_source_from_index(client: TestClient):
+    """drop policy 后，它作为 source 的依赖应从反向索引消失。"""
+
+    pid = "drop_src_idx"
+    client.post(
+        f"/v1/policies/{pid}/chunks:upsert",
+        json={"chunks": _make_chunks(), "mode": "overwrite", "expected_dim": 4},
+    )
+    before = _deps_map(
+        client.get("/v1/relations:lookup-dependents", params={"target_policy_id": "OTHER_POL"})
+    )
+    assert before.get(pid) == 2
+
+    assert client.delete(f"/v1/policies/{pid}").status_code == 200
+
+    after = _deps_map(
+        client.get("/v1/relations:lookup-dependents", params={"target_policy_id": "OTHER_POL"})
+    )
+    assert pid not in after
+
+
+def test_reindex_endpoint_rebuilds(client: TestClient):
+    """reindex 端点全量重建后仍能正确点查。"""
+
+    pid = "reindex_src"
+    client.post(
+        f"/v1/policies/{pid}/chunks:upsert",
+        json={"chunks": _make_chunks(), "mode": "overwrite", "expected_dim": 4},
+    )
+
+    resp = client.post("/v1/relations:reindex")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["sources"] >= 1
+
+    deps = _deps_map(
+        client.get("/v1/relations:lookup-dependents", params={"target_policy_id": "OTHER_POL"})
+    )
+    assert deps.get(pid) == 2

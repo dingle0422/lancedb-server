@@ -19,11 +19,12 @@ import math
 import os
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 import pyarrow as pa
 
+from . import relation_index
 from .config import get_settings
 from .embedding_fallback import embed_query, embed_texts
 from .schema import (
@@ -101,13 +102,46 @@ def _schedule_indexing(policy_id: str) -> None:
         _run_indexing_job(policy_id)
 
 
+# 反向索引（relation_index）后台补建：首次启用 / 历史数据时索引尚未覆盖全部 source，
+# lookup_dependents 会本次回退全表扫描，并把缺失的 source 丢到这里异步补建，逐步收敛。
+_relindex_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="relidx")
+_relindex_pending: set[str] = set()
+_relindex_pending_lock = threading.Lock()
+
+
+def _relindex_backfill_job(policy_ids: list[str]) -> None:
+    for pid in policy_ids:
+        with _relindex_pending_lock:
+            _relindex_pending.discard(pid)
+        _maintain_relation_index_for_source(pid)
+
+
+def _schedule_relindex_backfill(missing: set[str]) -> None:
+    if not missing:
+        return
+    with _relindex_pending_lock:
+        todo = [p for p in missing if p not in _relindex_pending]
+        if not todo:
+            return
+        _relindex_pending.update(todo)
+    try:
+        _relindex_executor.submit(_relindex_backfill_job, todo)
+    except RuntimeError:
+        # 线程池已关闭（进程退出阶段）：同步补建，避免任务丢失。
+        with _relindex_pending_lock:
+            for p in todo:
+                _relindex_pending.discard(p)
+        _relindex_backfill_job(todo)
+
+
 @atexit.register
 def _shutdown_index_executor() -> None:
     # 进程退出前尽量等已排队的建索引任务跑完，避免索引缺失。
-    try:
-        _index_executor.shutdown(wait=True)
-    except Exception:  # noqa: BLE001
-        pass
+    for ex in (_index_executor, _relindex_executor):
+        try:
+            ex.shutdown(wait=True)
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def _evict_and_release(policy_id: str) -> None:
@@ -320,7 +354,14 @@ def drop_table(policy_id: str) -> bool:
             return False
         _evict_and_release(policy_id)
         _drop_table_with_retry(db, name)
-        return True
+
+    # 清除该 source 在反向索引中的条目（仅作为 source；作为 target 被引用的条目保留）。
+    if get_settings().enable_relation_index:
+        try:
+            relation_index.remove_source(policy_id)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[Store] 反向索引删除 source 失败 policy=%s（忽略）: %s", policy_id, e)
+    return True
 
 
 def list_policies() -> list[tuple[str, int, int]]:
@@ -340,6 +381,22 @@ def list_policies() -> list[tuple[str, int, int]]:
             logger.warning("[Store] 读取表 %s 失败: %s", safe_name, e)
             continue
         out.append((pid, int(n), int(dim)))
+    return out
+
+
+def _iter_policy_ids() -> list[str]:
+    """只枚举/解码 policy_id，不做 ``open_table`` / ``count_rows`` / ``detect_dim``。
+
+    用于只关心「有哪些表」而不关心行数/维度的场景（如 :func:`lookup_dependents`），
+    避免 :func:`list_policies` 对每张表的额外 IO。
+    """
+
+    db = _connect()
+    out: list[str] = []
+    for safe_name in _all_table_names(db):
+        pid = _decode_policy_id(safe_name)
+        if pid:
+            out.append(pid)
     return out
 
 
@@ -981,6 +1038,9 @@ def upsert(policy_id: str, rows: list[ChunkRow], mode: str, expected_dim: int | 
         with write_lock:
             ensure_indexes(tbl)
 
+    # 维护 relation 反向索引（lookup_dependents 点查所需）：按本 source 重算依赖足迹。
+    _maintain_relation_index_for_source(policy_id)
+
     return {
         "written": len(rows),
         "table_size": table_size,
@@ -1318,22 +1378,185 @@ def lookup_relations(
     return out
 
 
-def lookup_dependents(target_policy_id: str, target_clause_id: str | None) -> list[tuple[str, int]]:
-    """全局反查：返回 ``[(source_policy_id, n_hits), ...]``，用于 cascade 触发。"""
+# lookup_dependents 单表扫描的最大行数上限，与 lookup_relations 对齐。
+_DEPENDENTS_SCAN_LIMIT = 100000
 
-    out: list[tuple[str, int]] = []
-    for pid, _n, _dim in list_policies():
-        if pid == target_policy_id:
-            continue  # 自反不计
-        hits = lookup_relations(
-            pid,
-            target_policy_id=target_policy_id,
-            target_clause_id=target_clause_id,
-            include_content=False,
+
+def _count_dependents_in_table(
+    policy_id: str, target_policy_id: str, target_clause_id: str | None
+) -> int:
+    """统计单张表中引用 ``(target_policy_id[, target_clause_id])`` 的 derived chunk 数。
+
+    与 :func:`lookup_relations` 不同：只 select ``relation_keys`` 一列、不构造
+    ``SearchHit``，因此 IO 量和 Python 开销都远小于全列拉取。
+    """
+
+    if not table_exists(policy_id):
+        return 0
+    tbl = open_table(policy_id)
+    if "relation_keys" not in _table_columns(tbl):
+        return 0
+    try:
+        rows = (
+            tbl.search()
+            .select(["relation_keys"])
+            .where("kind = 'derived'")
+            .limit(_DEPENDENTS_SCAN_LIMIT)
+            .to_list()
         )
-        if hits:
-            out.append((pid, len(hits)))
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[Store] lookup_dependents 扫描表 %s 失败（忽略）: %s", policy_id, e)
+        return 0
+
+    n = 0
+    for r in rows:
+        for rk in r.get("relation_keys") or []:
+            if rk.get("policy_id") != target_policy_id:
+                continue
+            if target_clause_id and rk.get("clause_id") != target_clause_id:
+                continue
+            n += 1
+            break  # 一行命中一次即可，与 lookup_relations 语义一致
+    return n
+
+
+def _aggregate_source_dependencies(policy_id: str) -> list[tuple[str, str, int, int]]:
+    """扫描单张表的 derived ``relation_keys``，聚合出该 source 的依赖足迹。
+
+    返回 ``[(target_policy_id, clause_id, is_any, n_rows), ...]``，计数口径与
+    :func:`_count_dependents_in_table` 完全一致（每个 derived 行命中一次）：
+    - ``is_any=1``：clause 无关，统计引用该 target（任意 clause）的 derived 行数；
+    - ``is_any=0``：统计引用 ``(target, clause)`` 的 derived 行数。
+    """
+
+    if not table_exists(policy_id):
+        return []
+    tbl = open_table(policy_id)
+    if "relation_keys" not in _table_columns(tbl):
+        return []
+    rows = (
+        tbl.search()
+        .select(["relation_keys"])
+        .where("kind = 'derived'")
+        .limit(_DEPENDENTS_SCAN_LIMIT)
+        .to_list()
+    )
+
+    any_counts: dict[str, int] = {}
+    pair_counts: dict[tuple[str, str], int] = {}
+    for r in rows:
+        targets: set[str] = set()
+        pairs: set[tuple[str, str]] = set()
+        for rk in r.get("relation_keys") or []:
+            t = rk.get("policy_id") or ""
+            if not t:
+                continue
+            c = rk.get("clause_id") or ""
+            targets.add(t)
+            pairs.add((t, c))
+        for t in targets:
+            any_counts[t] = any_counts.get(t, 0) + 1
+        for pair in pairs:
+            pair_counts[pair] = pair_counts.get(pair, 0) + 1
+
+    entries: list[tuple[str, str, int, int]] = [
+        (t, "", 1, n) for t, n in any_counts.items()
+    ]
+    entries.extend((t, c, 0, n) for (t, c), n in pair_counts.items())
+    return entries
+
+
+def _maintain_relation_index_for_source(policy_id: str) -> None:
+    """重算并写入某 source 的反向索引条目；任何异常都不影响主流程（可重建）。"""
+
+    if not get_settings().enable_relation_index:
+        return
+    try:
+        entries = _aggregate_source_dependencies(policy_id)
+        relation_index.update_source(policy_id, entries)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[Store] 维护反向索引失败 policy=%s（忽略，可重建）: %s", policy_id, e)
+
+
+def rebuild_relation_index() -> dict:
+    """全量重建反向索引：清空后逐表聚合。返回 ``{"sources": n}``。"""
+
+    relation_index.clear()
+    pids = _iter_policy_ids()
+    for pid in pids:
+        _maintain_relation_index_for_source(pid)
+    logger.info("[Store] 反向索引重建完成，覆盖 %d 个 source", len(pids))
+    return {"sources": len(pids)}
+
+
+def _lookup_dependents_scan(
+    target_policy_id: str, target_clause_id: str | None
+) -> list[tuple[str, int]]:
+    """全表扫描实现：各源表互相独立，按 ``LOOKUP_DEPENDENTS_MAX_WORKERS`` 有界并行。
+
+    作为反向索引未启用 / 未覆盖 / 异常时的兜底路径。
+    """
+
+    pids = [pid for pid in _iter_policy_ids() if pid != target_policy_id]  # 自反不计
+    if not pids:
+        return []
+
+    max_workers = max(1, get_settings().lookup_dependents_max_workers)
+    out: list[tuple[str, int]] = []
+
+    if max_workers == 1 or len(pids) == 1:
+        for pid in pids:
+            n = _count_dependents_in_table(pid, target_policy_id, target_clause_id)
+            if n:
+                out.append((pid, n))
+        out.sort(key=lambda x: x[0])
+        return out
+
+    with ThreadPoolExecutor(
+        max_workers=min(max_workers, len(pids)), thread_name_prefix="lookup-dep"
+    ) as ex:
+        futures = {
+            ex.submit(_count_dependents_in_table, pid, target_policy_id, target_clause_id): pid
+            for pid in pids
+        }
+        for fut in as_completed(futures):
+            pid = futures[fut]
+            try:
+                n = fut.result()
+            except Exception as e:  # noqa: BLE001
+                logger.warning("[Store] lookup_dependents 表 %s 失败（忽略）: %s", pid, e)
+                continue
+            if n:
+                out.append((pid, n))
+
+    out.sort(key=lambda x: x[0])  # 并行完成顺序不定，排序保证输出稳定
     return out
+
+
+def lookup_dependents(target_policy_id: str, target_clause_id: str | None) -> list[tuple[str, int]]:
+    """全局反查：返回 ``[(source_policy_id, n_hits), ...]``，用于 cascade 触发。
+
+    优先走 SQLite 反向索引点查（见 :mod:`app.relation_index`）。当索引尚未覆盖全部
+    source（首次启用 / 历史数据迁移）或查询异常时，本次回退到全表扫描
+    :func:`_lookup_dependents_scan`，并在后台补建缺失的 source，逐步收敛到点查。
+    """
+
+    if get_settings().enable_relation_index and relation_index.enabled():
+        try:
+            indexed = relation_index.indexed_sources()
+            current = set(_iter_policy_ids())
+            missing = current - indexed
+            if not missing:
+                return relation_index.lookup(target_policy_id, target_clause_id)
+            logger.info(
+                "[Store] 反向索引未覆盖 %d 个 source，后台补建中，本次回退全表扫描",
+                len(missing),
+            )
+            _schedule_relindex_backfill(missing)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[Store] 反向索引查询失败，回退全表扫描: %s", e)
+
+    return _lookup_dependents_scan(target_policy_id, target_clause_id)
 
 
 # ---------------------------------------------------------------- meta

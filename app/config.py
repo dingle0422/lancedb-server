@@ -43,6 +43,12 @@ class Settings(BaseSettings):
     # 关掉则恢复旧的「无脑追加」语义（允许同 chunk_id 多行）。
     idempotent_append: bool = True
     rrf_k: int = 60
+    # 全局反查 lookup_dependents 时并行扫描源表的最大线程数（各表互相独立）。
+    # 设为 1 可退回串行；表很多时调大可显著降低 cascade 触发的总耗时。
+    lookup_dependents_max_workers: int = 8
+    # 是否启用 relation 反向索引（SQLite）：把 lookup_dependents 从全库扫描降为点查。
+    # upsert 成功后按 source 增量维护；关掉则始终走全表扫描（行为与旧版一致）。
+    enable_relation_index: bool = True
     enable_generic_api: bool = True
     enable_legacy_relations: bool = True
     enable_legacy_ui: bool = True
