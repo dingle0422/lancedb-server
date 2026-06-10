@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     - ``API_KEY``：客户端 X-API-Key / Bearer Token 校验值；为空时关闭鉴权（仅供本地开发）。
     - ``ENABLE_SCALAR_INDEX``：是否在 ``kind`` / ``parent_chunk_index`` 上建标量索引。
       极小表（< 1k chunks）可关掉以省构建时间。
+    - ``VECTOR_INDEX_MIN_ROWS``：行数达到该阈值才建 IVF-PQ 近似向量索引；低于此值
+      不建索引，``search(vector)`` 仍可用且走全表精确 KNN（无 PQ 量化、无 KMeans 空簇告警）。
     - ``ENABLE_ASYNC_INDEXING``：是否把 upsert 后的建索引放到后台异步执行。默认开启，
       可显著降低 upsert 响应时延、避免客户端读超时；关掉则恢复同步建索引（旧行为）。
     - ``IDEMPOTENT_APPEND``：是否让 ``append`` 模式按 ``chunk_id`` 幂等 upsert。默认开启，
@@ -37,6 +39,8 @@ class Settings(BaseSettings):
     port: int = 5000
     log_level: str = "INFO"
     enable_scalar_index: bool = True
+    # 低于此行数不建 IVF-PQ；向量检索仍走 LanceDB 全表 flat KNN（精确 cosine）。
+    vector_index_min_rows: int = 4096
     # 是否把 upsert 后的建索引动作放到后台线程异步执行（写完即返回，避免客户端 read timeout）。
     enable_async_indexing: bool = True
     # 是否让 append 模式按 chunk_id 幂等 upsert（同 id 更新、新 id 插入），避免重试产生重复行。

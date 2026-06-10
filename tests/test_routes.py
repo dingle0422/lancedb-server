@@ -764,6 +764,65 @@ def test_async_indexing_eventually_builds_fts(monkeypatch):
         assert any(h["chunk_id"] == 2 for h in search.json()["hits"])
 
 
+def test_small_table_drops_existing_ivf_pq_index(monkeypatch):
+    """历史遗留 IVF-PQ 小表：行数低于阈值时 ensure_indexes 自动 drop 向量索引，
+    数据保留，向量检索回退 flat KNN 仍可命中。"""
+
+    import numpy as np
+
+    with _build_client(monkeypatch, VECTOR_INDEX_MIN_ROWS=256) as c:
+        from app import store
+
+        pid = "drop_idx_pid"
+        rng = np.random.default_rng(0)
+        rows = []
+        for i in range(300):
+            vec = rng.random(4).astype("float32").tolist()
+            rows.append(
+                store.ChunkRow(
+                    chunk_id=i,
+                    content=f"doc {i}",
+                    content_tokenized=f"doc {i}",
+                    vector=vec,
+                    kind="original",
+                    parent_chunk_index=-1,
+                    derived_seq=0,
+                    hop_depth=0,
+                    source="s",
+                )
+            )
+        store.upsert(pid, rows, mode="overwrite", expected_dim=4)
+
+        tbl = store.open_table(pid)
+        assert store._has_index_on(tbl, "vector"), "300 行 + 阈值256 应已建 IVF-PQ"
+
+        # 阈值抬高到行数之上：重跑 ensure_indexes 应 drop 掉向量索引。
+        from app.config import get_settings
+
+        monkeypatch.setenv("VECTOR_INDEX_MIN_ROWS", "100000")
+        get_settings.cache_clear()
+
+        store.ensure_indexes(tbl)
+        tbl2 = store.open_table(pid)
+        assert not store._has_index_on(tbl2, "vector"), "小表应已 drop 向量索引"
+        assert tbl2.count_rows() == 300, "drop 索引不应删除任何行"
+
+        # 仍可向量检索（flat KNN）：查询第 0 行的向量应能命中自己。
+        q = rows[0].vector
+        hits = store.hybrid_search(
+            pid,
+            query_tokenized="",
+            query_vector=q,
+            top_n=5,
+            top_m=0,
+            rrf_k=60,
+            where=None,
+            include_content=False,
+            include_derived=True,
+        )
+        assert any(h.chunk_id == 0 for h in hits), "drop 索引后向量检索仍应可用"
+
+
 def test_append_is_idempotent(client: TestClient):
     """append 模式按 chunk_id 幂等：同一文档重复 upsert 不产生重复行，且内容被更新。"""
 

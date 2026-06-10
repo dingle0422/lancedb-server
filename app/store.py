@@ -711,17 +711,23 @@ def _detect_dim(tbl) -> int:
     return 0
 
 
-def _has_index_on(tbl, column: str) -> bool:
+def _index_name_on(tbl, column: str) -> str | None:
+    """返回建在 ``column`` 上的索引名（用于 drop_index）；不存在返回 None。"""
+
     try:
         for idx in tbl.list_indices():
             cols = getattr(idx, "columns", None) or getattr(idx, "fields", None) or []
             if isinstance(cols, str):
                 cols = [cols]
             if column in (cols or []):
-                return True
+                return getattr(idx, "name", None)
     except Exception:
-        return False
-    return False
+        return None
+    return None
+
+
+def _has_index_on(tbl, column: str) -> bool:
+    return _index_name_on(tbl, column) is not None
 
 
 def ensure_indexes(tbl) -> dict[str, bool]:
@@ -749,16 +755,33 @@ def ensure_indexes(tbl) -> dict[str, bool]:
     else:
         fts_ok = True
 
-    # 向量索引：仅在 dim>0 且行数足够时建（小表全量扫足够）
+    # 向量索引（IVF-PQ）：仅大行数时建。小表不建索引，search(vector) 仍可用且为全表精确 KNN。
     dim = _detect_dim(tbl)
-    if dim > 0 and n >= 256 and not _has_index_on(tbl, "vector"):
+    min_rows = max(1, int(settings.vector_index_min_rows))
+    existing_vec_idx = _index_name_on(tbl, "vector")
+    if dim > 0 and n >= min_rows and existing_vec_idx is None:
         try:
             tbl.create_index(metric="cosine", vector_column_name="vector", replace=True)
             vec_ok = True
         except Exception as e:
             logger.warning("[Store] 建向量索引失败: %s", e)
+    elif existing_vec_idx is not None and n < min_rows:
+        # 行数已回落到阈值以下（历史遗留 IVF-PQ 小表）：drop 掉近似索引，让 search 回到
+        # 全表精确 KNN。drop_index 只删派生索引结构，不动 vector 列与任何行数据。
+        try:
+            tbl.drop_index(existing_vec_idx)
+            logger.info(
+                "[Store] 行数 %d < %d，已 drop 向量索引 %s，向量检索改走 flat KNN",
+                n,
+                min_rows,
+                existing_vec_idx,
+            )
+            vec_ok = False
+        except Exception as e:
+            logger.warning("[Store] drop 向量索引 %s 失败（忽略，仍可检索）: %s", existing_vec_idx, e)
+            vec_ok = True
     else:
-        vec_ok = dim > 0
+        vec_ok = dim > 0 and existing_vec_idx is not None
 
     # 标量索引（可关）
     if settings.enable_scalar_index:
